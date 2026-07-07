@@ -1,0 +1,6 @@
+float64[] delta_pose
+float64[] x_j_true
+float64[] information
+---
+bool success
+string message
