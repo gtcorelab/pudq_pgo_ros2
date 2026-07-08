@@ -47,8 +47,6 @@ void PUDQGraph::add_vertex(Eigen::Vector4d vertex_pudq) {
     num_vertices_++;
 }
 
-
-
 void PUDQGraph::add_vertex_true(Eigen::Vector4d vertex_pudq) {
     //Add PUDQ and equivalent Euclidean vertices to the graph
     vertices_true_pudq_.push_back(vertex_pudq);
@@ -58,18 +56,18 @@ void PUDQGraph::add_vertex_true(Eigen::Vector4d vertex_pudq) {
 void PUDQGraph::add_edge(size_t i, size_t j, Eigen::Vector4d edge_pudq, Eigen::Matrix3d info_pudq) {
 
     //Perform necessary checks to make sure this edge can exist
-    if (!(i < vertices_pudq_.size() && j < vertices_pudq_.size())) {
-        printf("PUDQGraph add_edge: Edge (%d,%d) out of range!", i, j);
-        return;
-    }
+    // if (!(i < vertices_pudq_.size() && j < vertices_pudq_.size())) {
+    //     printf("PUDQGraph add_edge: Edge (%ld,%ld) out of range!\n", i, j);
+    //     return;
+    // }
 
     if (i == j) {
-        printf("PUDQGraph add_edge: No self-loops!");
+        printf("PUDQGraph add_edge: No self-loops!\n");
         return;
     }
 
     if (edge_exists(i, j)) {
-        printf("PUDQGraph add_edge: Edge (%d,%d) already exists!", i, j);
+        printf("PUDQGraph add_edge: Edge (%ld,%ld) already exists!\n", i, j);
         return;
     }
 
@@ -93,7 +91,7 @@ void PUDQGraph::update_multi_vertex(int agent_id, size_t j, Eigen::Vector4d vert
 }
 
 void PUDQGraph::add_multi_edge(size_t i, int agent_id, size_t j, Eigen::Vector4d edge_pudq, Eigen::Matrix3d info_pudq) {
-    printf("Added multi-edge (%d, %d, %d) to graph.", i, agent_id, j);
+    printf("Added multi-edge (%ld, %d, %ld) to graph.\n", i, agent_id, j);
 
     Edge e;
     e.delta_pose_pudq = edge_pudq;
@@ -112,7 +110,7 @@ bool PUDQGraph::edge_exists(size_t i, size_t j) {
 
 void PUDQGraph::print_graph() {
     
-    printf("Pose graph with %d vertices and %d edges:", num_vertices_, num_edges_);
+    printf("Pose graph with %ld vertices and %ld edges:", num_vertices_, num_edges_);
 
     for (auto it0 = edges_.begin(); it0 != edges_.end(); ++it0) {
         std::map<size_t, Edge> edge = it0->second;

@@ -46,8 +46,12 @@ private:
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_{nullptr};
     std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
 
+    rclcpp::TimerBase::SharedPtr viz_timer_;
+
     //Parameters
-    bool use_g2o_;
+    bool g2o_mode_;
+    std::string g2o_file_;
+
     std::string robot_name_, map_frame_id_, fixed_frame_id_;
     double sigma_t_, sigma_theta_;
 
@@ -70,6 +74,12 @@ private:
     // std::vector<unsigned int> public_vertices_;
 
     void initialize_graph();
+
+    void init_g2o_vertices(int num_vertices);
+    void odom_init();
+
+    int read_g2o_file();
+
     void initialize_viz();
     void update_estimate_viz();
     // void update_multi_lc_viz();
@@ -87,10 +97,12 @@ private:
 
     void print_graph(const std::shared_ptr<std_srvs::srv::Empty::Request> request, std::shared_ptr<std_srvs::srv::Empty::Response> response);
     void print_cost(const std::shared_ptr<std_srvs::srv::Empty::Request> request, std::shared_ptr<std_srvs::srv::Empty::Response> response);
+
+    void viz_timer_callback();
     
 public:
     PUDQGraphManager();
-    // void timer_callback(const ros::TimerEvent& event);
+    
 };
 
 #endif

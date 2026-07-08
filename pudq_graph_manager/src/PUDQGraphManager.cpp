@@ -1,5 +1,7 @@
 #include "PUDQGraphManager.hpp"
 
+#include <fstream>
+
 using std::placeholders::_1;
 using std::placeholders::_2;
 using namespace std::chrono_literals;
@@ -14,13 +16,23 @@ PUDQGraphManager::PUDQGraphManager() : Node("pudq_graph_manager_node") {
 
     robot_name_ = std::string(this->get_namespace()).substr(1);
 
-    // private_nh_.param<bool>("use_g2o", use_g2o_, false);
-
     //Get parameters
     std::string map_frame_noprefix;
     fixed_frame_id_ = this->declare_parameter<std::string>("fixed_frame", "world");
     map_frame_noprefix = this->declare_parameter<std::string>("map_frame", "map");
     map_frame_id_ = std::string(robot_name_).append("_").append(map_frame_noprefix);
+
+    g2o_mode_ = this->declare_parameter<bool>("g2o_mode", false);
+    if (g2o_mode_) {
+        g2o_file_ = this->declare_parameter<std::string>("g2o_file", "");
+
+        if (g2o_file_.length() > 0) {
+            RCLCPP_INFO(this->get_logger(), "Optimizing g2o file: %s", g2o_file_.c_str());
+        } else {
+            RCLCPP_ERROR(this->get_logger(), "No g2o file provided!");
+            return;
+        }
+    }
 
     // private_nh_.param<std::string>("robot_name", robot_name_, "turtlebot3");
     // private_nh_.param<std::string>("map_frame", map_frame_noprefix, "map");
@@ -29,42 +41,46 @@ PUDQGraphManager::PUDQGraphManager() : Node("pudq_graph_manager_node") {
 
     RCLCPP_INFO(this->get_logger(), "PUDQGraphManager %s: Map frame set to \'%s\'.", robot_name_.c_str(), map_frame_id_.c_str());
 
-    //Initialize graph object
-    initialize_graph();
-
     //Initialize graph visualizer
     initialize_viz();
+
+    //Graph visualization publishers
+
+    vertices_publisher_ = this->create_publisher<geometry_msgs::msg::PoseArray>("vertices", rclcpp::ServicesQoS());
+    edge_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>("edge_viz", rclcpp::ServicesQoS());
+    odom_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>("odom_viz", rclcpp::ServicesQoS());
+    // edge_true_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>("true_edge_viz", 10);
+    // legend_publisher_.publish(legend_markers_);
 
     //Initialize tf listener
     tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
-    //Distributed stuff
-    // map_pudq_ = pudq_identity();
-    // map_frame_init_ = false;
-
     print_graph_service_ = this->create_service<std_srvs::srv::Empty>("print_graph", std::bind(&PUDQGraphManager::print_graph, this, _1, _2));
     print_cost_service_ = this->create_service<std_srvs::srv::Empty>("print_cost", std::bind(&PUDQGraphManager::print_cost, this, _1, _2));
 
-    //Subscribe to true (e.g., mocap) vertices
-    vertex_subscriber_ = this->create_subscription<pudq_msgs::msg::PUDQVertex>("pudq_vertex_true", 10, std::bind(&PUDQGraphManager::vertex_callback, this, _1));
+    if (g2o_mode_) {
+        read_g2o_file();
 
-    //Subsribe to odom and loop closure edges
-    // lc_subscriber_ = nh_.subscribe<pudq_msgs::PUDQEdge>("pudq_loop_closure", 10, boost::bind(&PUDQGraphManager::lc_edge_callback, this, _1));
+        // Start a 1 second viz update timer
+        viz_timer_ = this->create_wall_timer(1s, std::bind(&PUDQGraphManager::viz_timer_callback, this));
+    } else {
+        // Initialize graph to identity vertex
+        initialize_graph();
 
-    edge_subscriber_ = this->create_subscription<pudq_msgs::msg::PUDQEdge>("pudq_edge", 10, std::bind(&PUDQGraphManager::edge_callback, this, _1));
-    // lc_subscriber_ = this->create_subscription<pudq_msgs::msg::PUDQEdge>("pudq_loop_closure", 10, std::bind(&PUDQGraphManager::lc_edge_callback, this, _1));
+        // Subscribe to true (e.g., mocap) vertices
+        vertex_subscriber_ = this->create_subscription<pudq_msgs::msg::PUDQVertex>("pudq_vertex_true", 10, std::bind(&PUDQGraphManager::vertex_callback, this, _1));
 
-    //Graph visualization publishers
-    vertices_publisher_ = this->create_publisher<geometry_msgs::msg::PoseArray>("vertices", 10);
-    edge_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>("edge_viz", 10);
-    odom_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>("odom_viz", 10);
-    edge_true_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>("true_edge_viz", 10);
+        // Subsribe to odom and loop closure edges
+        // lc_subscriber_ = nh_.subscribe<pudq_msgs::PUDQEdge>("pudq_loop_closure", 10, boost::bind(&PUDQGraphManager::lc_edge_callback, this, _1));
+        edge_subscriber_ = this->create_subscription<pudq_msgs::msg::PUDQEdge>("pudq_edge", 10, std::bind(&PUDQGraphManager::edge_callback, this, _1));
+        // lc_subscriber_ = this->create_subscription<pudq_msgs::msg::PUDQEdge>("pudq_loop_closure", 10, std::bind(&PUDQGraphManager::lc_edge_callback, this, _1));
+    }
 
-    // legend_publisher_.publish(legend_markers_);
+    //Distributed stuff
+    // map_pudq_ = pudq_identity();
+    // map_frame_init_ = false;
 }
-
-// t = tf_buffer_->lookupTransform(toFrameRel, fromFrameRel, tf2::TimePointZero);
 
 void PUDQGraphManager::initialize_graph() {
     G.clear();
@@ -76,6 +92,175 @@ void PUDQGraphManager::initialize_graph() {
     odom_vertices_.push_back(pudq_to_pose(pudq_identity()));
 
     RCLCPP_WARN(this->get_logger(),  "Pose graph initialized");
+}
+
+void PUDQGraphManager::init_g2o_vertices(int num_vertices) {
+    // Initialize all g2o vertices to identity
+    for (int i = 0; i < num_vertices; i++) {
+        G.add_vertex(pudq_identity());  
+    }
+}
+
+void PUDQGraphManager::odom_init() {
+
+    // Fix the origin to identity
+    G.set_vertex(0, pudq_identity());
+    for (size_t j = 1; j < G.vertices_pudq_.size(); j++) {
+        
+        size_t i = j-1;
+
+        // Make sure there exists an odom edge from i to j
+        bool odom_edge_exists = false;
+        if (G.edges_.count(i) > 0 || G.edges_.count(j) > 0) {
+            if (G.edges_[i].count(j) > 0) {
+                odom_edge_exists = true;
+
+                // Propogate odom via x_j = x_i comp. z_ij
+                Eigen::Vector4d x_i_odom = G.vertices_pudq_[i];
+                Eigen::Vector4d x_j_odom = pudq_compose(x_i_odom, G.edges_[i][j].delta_pose_pudq);
+                G.set_vertex(j, x_j_odom);
+            } else if (G.edges_[j].count(i) > 0) {
+                // Account for reverse odom edges in some datasets
+                odom_edge_exists = true;
+
+                // Propogate odom via x_j = x_i comp. z_ij^(-1)
+                Eigen::Vector4d x_i_odom = G.vertices_pudq_[i];
+                Eigen::Vector4d x_j_odom = pudq_compose(x_i_odom, G.edges_[i][j].delta_pose_pudq.inverse());
+                G.set_vertex(j, x_j_odom);
+            }
+        }
+
+        if (!odom_edge_exists) {
+            // Don't print this warning for now bc some datasets are just FUBARed
+            fprintf(stderr, "Warning: Missing odom edge from %ld->%ld! Assuming identity.\n", i, j);
+
+            //Propogate odom via x_j = x_i comp. z_ij
+            Eigen::Vector4d z_ij_id = pudq_identity();
+            Eigen::Vector4d x_i_odom = G.vertices_pudq_[i];
+            Eigen::Vector4d x_j_odom = pudq_compose(x_i_odom, z_ij_id);
+            G.set_vertex(j, x_j_odom);
+        }
+    }
+}
+
+int PUDQGraphManager::read_g2o_file() {
+
+    // Open g2o file for reading
+    std::ifstream g2ofile(g2o_file_);
+
+    // Check if the file opened successfully
+    if (!g2ofile.is_open()) {   
+        RCLCPP_ERROR(this->get_logger(), "Error opening file %s!\n", g2o_file_.c_str());
+        return -1;
+    }
+
+    RCLCPP_INFO(this->get_logger(), "Processing g2o file");
+
+    std::map<int, Eigen::Vector4d> init_vertices;
+    int max_vertex = 0;
+
+    std::string line;
+    while (std::getline(g2ofile, line)) {
+        // Todo: Catch g2o formatting errors
+        std::string prefix;
+        std::istringstream line_stream(line);
+        line_stream >> prefix;
+
+        if (prefix == std::string("EDGE_SE2")) {
+
+            // The g2o format specifies a 3D relative pose measurement in the following form:
+            // EDGE_SE2 id1 id2 dx dy dtheta, I11, I12, I13, I22, I23, I33
+            int i, j;
+            double dx, dy, dtheta;
+            double I11, I12, I13, I22, I23, I33;
+            line_stream >> i >> j >> dx >> dy >> dtheta >> I11 >> I12 >> I13 >> I22 >> I23 >> I33;
+
+            Eigen::Vector3d dp_ij;
+            dp_ij << dx, dy, dtheta;
+            Eigen::Vector4d z_ij = pudq_lib::pose_to_pudq(dp_ij);
+
+            Eigen::MatrixXd Omega_ij(3,3);
+            Omega_ij << I11, I12, I13, I12, I22, I23, I13, I23, I33;
+
+            // No self-loops, but we do allow edges where j >> i
+            if (i != j) {
+                G.add_edge(i, j, z_ij, Omega_ij);
+            } else {
+                RCLCPP_ERROR(this->get_logger(), "Invalid self-loop from %d->%d\n", i, j);
+            }
+
+            //Update maximum vertex
+            max_vertex = std::max(max_vertex, std::max(i, j));
+
+        } else if (prefix == std::string("VERTEX_SE2")) {
+            int i;
+            double tx, ty, theta;
+
+            line_stream >> i >> tx >> ty >> theta;
+
+            Eigen::Vector3d pose_i;
+            pose_i << tx, ty, theta;
+
+            Eigen::Vector4d x_i;
+            x_i = pudq_lib::pose_to_pudq(pose_i);
+
+            //Check for duplicate vertices
+            if (init_vertices.count(i) == 0) {
+                init_vertices[i] = x_i;
+            } else {
+                RCLCPP_ERROR(this->get_logger(), "Duplicate vertex %d in %s! Exiting.\n", i, g2o_file_.c_str());
+                return -1;
+            }
+        } else {
+            RCLCPP_ERROR(this->get_logger(), "Encountered invalid line prefix \"%s\".\n", prefix.c_str());
+            return -1;
+        }
+    }
+
+    size_t num_vertices = max_vertex+1;
+    init_g2o_vertices(num_vertices);
+
+    // If vertices were included, initialize the graph with them
+    if (init_vertices.size() > 0) {
+        std::cout << "Reading initial vertices from " << g2o_file_ << std::endl;
+
+        if (init_vertices.size() == num_vertices) {
+            //Now, loop through and add each vertex in order. If any are missing, ignore and use odom
+            for (size_t i = 0; i < num_vertices; i++) {
+                if (init_vertices.count(i) > 0) {
+                    G.set_vertex(i, init_vertices[i]);
+                } else {
+                    RCLCPP_ERROR(this->get_logger(), "Vertex %ld is missing from %s! Initializing from odometry.\n", i, g2o_file_.c_str());
+                    break;
+                }
+            }
+        } else {
+            RCLCPP_ERROR(this->get_logger(), "Invalid number of vertices in %s! Initializing from odometry.\n", g2o_file_.c_str());
+        }
+    } else {
+        // Not included, initialize vertices from odometry
+        std::cout << "Vertices not included... initializing from odometry.\n" << std::endl;
+        odom_init();
+    }
+
+    std::cout << "Read pose graph with " << G.get_num_vertices() << " vertices and " << G.get_num_edges() << " edges from " << g2o_file_ << "." << std::endl;
+
+    g2ofile.close();
+
+    // Update odom vertices at initialization
+    for (size_t i = 0; i < G.get_num_vertices(); i++) {
+        odom_vertices_.push_back(G.vertices_[i]);
+    }
+    
+    update_odom_viz();
+    update_estimate_viz();
+
+    pudq_pgo_lib::optimize_rgn_fast(&G, 1e-5, 10);
+
+    update_odom_viz();
+    update_estimate_viz();
+
+    return 0;
 }
 
 void PUDQGraphManager::initialize_viz() {
@@ -115,131 +300,12 @@ void PUDQGraphManager::initialize_viz() {
     odom_marker_.pose.position = point3d(0.0, 0.0, 0.0);
     odom_marker_.pose.orientation = yaw_to_quat(0.0);
 
-    //Multi-lc edges
-    // multi_lc_marker_.header.frame_id = map_frame_id_;
-    // multi_lc_marker_.ns = robot_name_ + "/multi_lc_edges";
-    // multi_lc_marker_.id = 0;
-    // multi_lc_marker_.type = visualization_msgs::Marker::LINE_LIST;
-    // multi_lc_marker_.color = multi_lc_color_;
-    // multi_lc_marker_.scale = vector3(0.0075, 0.0, 0.0);
-    // multi_lc_marker_.pose.position = point3d(0.0, 0.0, 0.0);
-    // multi_lc_marker_.pose.orientation = yaw_to_quat(0.0);
-    // multi_lc_marker_.lifetime = ros::Duration(0.0);
-
-    //Initialize color-coded RVIZ legend
-    // legend_markers_.markers.clear();
-    // visualization_msgs::Marker truth_legend_text, lc_legend_text, inter_lc_legend_text, odom_legend_text, est_legend_text;
-
-    // int legend_id = 0;
-    // double legend_x_pos = -0.05;
-    // truth_legend_text.header.frame_id = fixed_frame_id_;
-    // truth_legend_text.ns = "legend";
-    // truth_legend_text.id = legend_id;
-    // truth_legend_text.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
-    // truth_legend_text.action = visualization_msgs::Marker::ADD;
-    // truth_legend_text.color = true_color_;
-    // truth_legend_text.pose.position.x = legend_x_pos;
-    // truth_legend_text.pose.position.y = 1.0;
-    // truth_legend_text.pose.position.z = 0.0;
-    // truth_legend_text.pose.orientation = yaw_to_quat(0.0);
-    // truth_legend_text.scale = vector3(0.15, 0.15, 0.15);
-    // truth_legend_text.lifetime = ros::Duration(0);
-    // truth_legend_text.text = "True Trajectory";
-    // legend_markers_.markers.push_back(truth_legend_text);
-
-    // legend_id++;
-    // legend_x_pos -= 0.2;
-    // lc_legend_text.header.frame_id = fixed_frame_id_;
-    // lc_legend_text.ns = "legend";
-    // lc_legend_text.id = legend_id;
-    // lc_legend_text.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
-    // lc_legend_text.action = visualization_msgs::Marker::ADD;
-    // lc_legend_text.color = lc_color_;
-    // lc_legend_text.pose.position.x = legend_x_pos;
-    // lc_legend_text.pose.position.y = 1.0;
-    // lc_legend_text.pose.position.z = 0.0;
-    // lc_legend_text.pose.orientation = yaw_to_quat(0.0);
-    // lc_legend_text.scale = vector3(0.15, 0.15, 0.15);
-    // lc_legend_text.lifetime = ros::Duration(0);
-    // lc_legend_text.text = "Intra-agent Loop Closures";
-    // legend_markers_.markers.push_back(lc_legend_text);
-
-    // legend_id++;
-    // legend_x_pos -= 0.2;
-    // inter_lc_legend_text.header.frame_id = fixed_frame_id_;
-    // inter_lc_legend_text.ns = "legend";
-    // inter_lc_legend_text.id = legend_id;
-    // inter_lc_legend_text.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
-    // inter_lc_legend_text.action = visualization_msgs::Marker::ADD;
-    // inter_lc_legend_text.color = color(1.0, 0.0, 0.0, 1.0);
-    // inter_lc_legend_text.pose.position.x = legend_x_pos;
-    // inter_lc_legend_text.pose.position.y = 1.0;
-    // inter_lc_legend_text.pose.position.z = 0.0;
-    // inter_lc_legend_text.pose.orientation = yaw_to_quat(0.0);
-    // inter_lc_legend_text.scale = vector3(0.15, 0.15, 0.15);
-    // inter_lc_legend_text.lifetime = ros::Duration(0);
-    // inter_lc_legend_text.text = "Inter-agent Loop Closures";
-    // legend_markers_.markers.push_back(inter_lc_legend_text);
-
-    // legend_id++;
-    // legend_x_pos -= 0.2;
-    // odom_legend_text.header.frame_id = fixed_frame_id_;
-    // odom_legend_text.ns = "legend";
-    // odom_legend_text.id = legend_id;
-    // odom_legend_text.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
-    // odom_legend_text.action = visualization_msgs::Marker::ADD;
-    // odom_legend_text.color = odom_color_;
-    // odom_legend_text.pose.position.x = legend_x_pos;
-    // odom_legend_text.pose.position.y = 1.0;
-    // odom_legend_text.pose.position.z = 0.0;
-    // odom_legend_text.pose.orientation = yaw_to_quat(0.0);
-    // odom_legend_text.scale = vector3(0.15, 0.15, 0.15);
-    // odom_legend_text.lifetime = ros::Duration(0);
-    // odom_legend_text.text = "Odom Trajectory";
-    // legend_markers_.markers.push_back(odom_legend_text);
-
-    // legend_id++;
-    // legend_x_pos -= 0.2;
-    // est_legend_text.header.frame_id = fixed_frame_id_;
-    // est_legend_text.ns = "legend";
-    // est_legend_text.id = legend_id;
-    // est_legend_text.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
-    // est_legend_text.action = visualization_msgs::Marker::ADD;
-    // est_legend_text.color = edge_color_;
-    // est_legend_text.pose.position.x = legend_x_pos;
-    // est_legend_text.pose.position.y = 1.0;
-    // est_legend_text.pose.position.z = 0.0;
-    // est_legend_text.pose.orientation = yaw_to_quat(0.0);
-    // est_legend_text.scale = vector3(0.15, 0.15, 0.15);
-    // est_legend_text.lifetime = ros::Duration(0);
-    // est_legend_text.text = "PUDQ Optimized Trajectory";
-    // legend_markers_.markers.push_back(est_legend_text);
-
-    // if (use_g2o_) {
-    //     legend_id++;
-    //     legend_x_pos -= 0.2;
-    //     visualization_msgs::Marker g2o_legend_text;
-    //     g2o_legend_text.header.frame_id = fixed_frame_id_;
-    //     g2o_legend_text.ns = "legend";
-    //     g2o_legend_text.id = legend_id;
-    //     g2o_legend_text.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
-    //     g2o_legend_text.action = visualization_msgs::Marker::ADD;
-    //     g2o_legend_text.color = color(1.0, 0.5, 0.0, 1.0); // Orange
-    //     g2o_legend_text.pose.position.x = legend_x_pos;
-    //     g2o_legend_text.pose.position.y = 1.0;
-    //     g2o_legend_text.pose.position.z = 0.0;
-    //     g2o_legend_text.pose.orientation = yaw_to_quat(0.0);
-    //     g2o_legend_text.scale = vector3(0.15, 0.15, 0.15);
-    //     g2o_legend_text.lifetime = ros::Duration(0);
-    //     g2o_legend_text.text = "G2O Optimized Trajectory";
-    //     legend_markers_.markers.push_back(g2o_legend_text);
-    // }
-
     est_marker_init_  = false;
     odom_marker_init_ = false;
     true_marker_init_ = false;
     multi_lc_viz_init_ = false;
 }
+
 
 void PUDQGraphManager::update_estimate_viz() {
     rclcpp::Time now = this->get_clock()->now();
@@ -375,6 +441,13 @@ void PUDQGraphManager::update_truth_viz() {
 
         edge_true_publisher_->publish(edges_true_marker_);
     }
+}
+
+void PUDQGraphManager::viz_timer_callback() {
+    
+
+    update_odom_viz();
+    update_estimate_viz();
 }
 
 void PUDQGraphManager::vertex_callback(const pudq_msgs::msg::PUDQVertex::SharedPtr vertex_msg) {
