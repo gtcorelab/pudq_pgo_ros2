@@ -10,10 +10,11 @@ find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_ros REQUIRED)
 
 find_package(rclcpp REQUIRED)
-find_package(std_msgs REQUIRED)
+# find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 
 find_package(pudq_lib REQUIRED)
+find_package(Eigen3 REQUIRED NO_MODULE)
 
 add_library(
     pudq_pgo_lib
@@ -24,7 +25,10 @@ add_library(
 )
 
 ament_target_dependencies(
-    pudq_pgo_lib
+    ${PROJECT_NAME}
+    Eigen3
+    rclcpp
+    geometry_msgs
     pudq_lib
 )
 

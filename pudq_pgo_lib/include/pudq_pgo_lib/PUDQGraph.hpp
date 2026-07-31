@@ -10,10 +10,13 @@
 //Eigen
 #include <eigen3/Eigen/Core>
 #include <eigen3/Eigen/Dense>
+#include <eigen3/Eigen/SparseCore>
+
 #include <pudq_lib/pudq_lib.hpp>
 
 class PUDQGraph {
 private:
+    size_t max_vertex_;
     size_t num_vertices_;
     size_t num_edges_;
 

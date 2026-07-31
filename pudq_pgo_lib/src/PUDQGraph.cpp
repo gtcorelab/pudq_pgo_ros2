@@ -36,7 +36,7 @@ void PUDQGraph::clear() {
 // This initializes all vertices from odometry measurements
 void PUDQGraph::odom_init() {
     // Todo: improve this process (works for now)
-    if (vertices_udq_.size() != max_vertex_ + 1) {
+    if (vertices_pudq_.size() != max_vertex_ + 1) {
         // Reinitialize if the edge and vertex dimensions don't line up
         // init_vertices(max_vertex_ + 1);
 
@@ -56,16 +56,16 @@ void PUDQGraph::odom_init() {
                 odom_edge_exists = true;
 
                 // Propogate odom via x_j = x_i comp. z_ij
-                DualQuaternion x_i_odom = vertices_pudq_[i];
-                DualQuaternion x_j_odom = x_i_odom * edge_vec_[adjacency_list[i][j]].z_ij;
+                Eigen::Vector4d x_i_odom = vertices_pudq_[i];
+                Eigen::Vector4d x_j_odom = pudq_lib::pudq_compose(x_i_odom, edge_vec_[adjacency_list[i][j]].z_ij);
                 set_vertex(j, x_j_odom);
             } else if (adjacency_list[j].count(i) > 0) {
                 // Account for reverse odom edges in some datasets
                 odom_edge_exists = true;
 
                 // Propogate odom via x_j = x_i comp. z_ij^(-1)
-                DualQuaternion x_i_odom = vertices_pudq_[i];
-                DualQuaternion x_j_odom = x_i_odom * edge_vec_[adjacency_list[i][j]].z_ij.inverse();
+                Eigen::Vector4d x_i_odom = vertices_pudq_[i];
+                Eigen::Vector4d x_j_odom = pudq_lib::pudq_compose(x_i_odom, edge_vec_[adjacency_list[i][j]].z_ij.inverse());
                 set_vertex(j, x_j_odom);
             }
         }
@@ -75,9 +75,9 @@ void PUDQGraph::odom_init() {
             // fprintf(stderr, "Warning: Missing odom edge from %ld->%ld! Assuming identity.\n", i, j);
 
             //Propogate odom via x_j = x_i comp. z_ij
-            DualQuaternion z_ij_id = pudq_lib::pudq_identity();
-            DualQuaternion x_i_odom = vertices_udq_[i];
-            DualQuaternion x_j_odom = x_i_odom * z_ij_id;
+            Eigen::Vector4d z_ij_id = pudq_lib::pudq_identity();
+            Eigen::Vector4d x_i_odom = vertices_pudq_[i];
+            Eigen::Vector4d x_j_odom = x_i_odom * z_ij_id;
             set_vertex(j, x_j_odom);
         }
     }
@@ -151,8 +151,8 @@ void PUDQGraph::add_edge(size_t i, size_t j, Eigen::Vector4d edge_pudq, Eigen::M
 
     // Resize and insert new Omega_ij into big Omega matrix
     Omega.conservativeResize(3*(num_edges_+1), 3*(num_edges_+1));
-    for (int i = 0; i < info_udq.rows(); i++) {
-        for (int j = 0; j < info_udq.cols(); j++) {
+    for (int i = 0; i < info_pudq.rows(); i++) {
+        for (int j = 0; j < info_pudq.cols(); j++) {
             Omega.insert(3*num_edges_+i, 3*num_edges_+j) = info_pudq(i,j);
         }
     }

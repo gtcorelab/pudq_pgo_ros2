@@ -9,9 +9,6 @@ namespace pudq_pgo_lib {
         Eigen::Matrix3d Omega_ij;
         Omega_ij << 0.5554, 0.5941, 0.7355, 0.5941, 1.2578, 1.2955, 0.7355, 1.2955, 1.3914;
 
-        int num_edges = 4;
-        int num_vertices = 4;
-
         //True poses
         Eigen::Vector3d pose_1, pose_2, pose_3, pose_4;
         pose_1 << 0.0, 0.0, 0.0;
@@ -62,7 +59,7 @@ namespace pudq_pgo_lib {
         G.add_edge(2, 3, z_34, Omega_ij);
         G.add_edge(3, 1, z_42, Omega_ij);
 
-        optimize_rgn(&G, 1e-5, 20);
+        optimize_rgn(G, 1e-5, 20);
     }
 
     void *J_ij(void *data) {
@@ -377,7 +374,7 @@ namespace pudq_pgo_lib {
     //     std::cout << "RGN max iterations reached." << std::endl;
     // }
 
-    void optimize_rgn(PUDQGraph *G, double tol, int max_iter) {
+    void optimize_rgn(PUDQGraph &G, double tol, int max_iter) {
 
         std::cout << G->get_num_vertices() << " vertices, " << G->get_num_edges() << " edges" << std::endl;
 
@@ -387,11 +384,15 @@ namespace pudq_pgo_lib {
         for (int k = 0; k < max_iter; k++) {
 
             //Compute Euclidean gradient and Gauss-Newton Hessian
-            Eigen::VectorXd egrad_k = egrad(G);
-            Eigen::MatrixXd gnhess_k = gnhess(G);
+
+
+            // Eigen::VectorXd egrad_k = egrad(G);
+            // Eigen::MatrixXd gnhess_k = gnhess(G);
+
+            std::tie(X_k, P_X, F_k, rgrad_k, rgnhess_k) = udq_pgo_lib::rgn_gradhess(pg);
 
             //Compute projection matrix
-            Eigen::MatrixXd P_X = P_X_N(G->get_X());
+            Eigen::MatrixXd P_X = P_X_N(G.get_X());
 
             //Compute Riemannian gradient
             Eigen::VectorXd rgrad_k = P_X * egrad_k;
@@ -433,7 +434,7 @@ namespace pudq_pgo_lib {
         printf("RGN max iterations reached.\n");
     }
 
-    double F_G_pudq(PUDQGraph *G) {
+    double F_G_pudq(PUDQGraph &G) {
         double F = 0.0;
 
         //Loop through all edges

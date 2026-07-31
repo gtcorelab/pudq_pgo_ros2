@@ -5,8 +5,14 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
+# Enable automatic parallel computation
+add_compile_options(-flto=auto)
+
 # find dependencies
 find_package(ament_cmake REQUIRED)
+
+find_package(Eigen3 REQUIRED NO_MODULE)
+
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
@@ -28,6 +34,7 @@ add_executable(
 
 ament_target_dependencies(
     ${PROJECT_NAME}_node
+    Eigen3
     rclcpp
     std_msgs
     std_srvs
@@ -45,6 +52,7 @@ target_include_directories(
     ${PROJECT_NAME}_node PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
+    ${EIGEN3_INCLUDE_DIR}
 )
 
 install(
