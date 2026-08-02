@@ -9,27 +9,44 @@ PUDQGraph::PUDQGraph() {
     num_edges_ = 0;
 }
 
-size_t PUDQGraph::get_num_vertices() {
+size_t PUDQGraph::get_num_vertices() const {
     return num_vertices_;
 }
 
-size_t PUDQGraph::get_num_edges() {
+size_t PUDQGraph::get_num_edges() const {
     return num_edges_;
 }
 
-Eigen::VectorXd PUDQGraph::get_X() {
-    Eigen::VectorXd X = Eigen::VectorXd::Zero(4*num_vertices_);
+Eigen::Vector4d PUDQGraph::get_vertex(size_t i) const {
+    if (i < vertices_pudq_.size()) {
+        return vertices_pudq_[i];
+    } else {
+        fprintf(stderr, "Error: Vertex %ld out of range!\n", i);
 
-    for (size_t i = 0; i < num_vertices_; i++) {
-        X.segment(4*i, 4) = vertices_pudq_[i];
+        return pudq_lib::pudq_identity();
     }
+}
 
-    return X;
+const std::vector<Eigen::Vector4d>& PUDQGraph::get_vertices() const {
+    return vertices_pudq_;
+}
+
+const std::map<size_t, std::map<size_t, size_t>>& PUDQGraph::get_adjacency() const {
+    return adjacency_list_;
+}
+
+const std::vector<PUDQGraph::Edge>& PUDQGraph::get_edges() const {
+    return edge_vec_;
+}
+
+const Eigen::SparseMatrix<double, Eigen::RowMajor>& PUDQGraph::get_Omega() const {
+    return Omega_;
 }
 
 void PUDQGraph::clear() {
     vertices_.clear();
     vertices_pudq_.clear();
+
     edge_vec_.clear();
 }
 
@@ -51,21 +68,21 @@ void PUDQGraph::odom_init() {
 
         // Make sure there exists an odom edge from i to j
         bool odom_edge_exists = false;
-        if (adjacency_list.count(i) > 0 || adjacency_list.count(j) > 0) {
-            if (adjacency_list[i].count(j) > 0) {
+        if (adjacency_list_.count(i) > 0 || adjacency_list_.count(j) > 0) {
+            if (adjacency_list_[i].count(j) > 0) {
                 odom_edge_exists = true;
 
                 // Propogate odom via x_j = x_i comp. z_ij
                 Eigen::Vector4d x_i_odom = vertices_pudq_[i];
-                Eigen::Vector4d x_j_odom = pudq_lib::pudq_compose(x_i_odom, edge_vec_[adjacency_list[i][j]].z_ij);
+                Eigen::Vector4d x_j_odom = pudq_lib::pudq_compose(x_i_odom, edge_vec_[adjacency_list_[i][j]].z_ij_pudq);
                 set_vertex(j, x_j_odom);
-            } else if (adjacency_list[j].count(i) > 0) {
+            } else if (adjacency_list_[j].count(i) > 0) {
                 // Account for reverse odom edges in some datasets
                 odom_edge_exists = true;
 
                 // Propogate odom via x_j = x_i comp. z_ij^(-1)
                 Eigen::Vector4d x_i_odom = vertices_pudq_[i];
-                Eigen::Vector4d x_j_odom = pudq_lib::pudq_compose(x_i_odom, edge_vec_[adjacency_list[i][j]].z_ij.inverse());
+                Eigen::Vector4d x_j_odom = pudq_lib::pudq_compose(x_i_odom, pudq_lib::pudq_inv(edge_vec_[adjacency_list_[i][j]].z_ij_pudq));
                 set_vertex(j, x_j_odom);
             }
         }
@@ -77,21 +94,8 @@ void PUDQGraph::odom_init() {
             //Propogate odom via x_j = x_i comp. z_ij
             Eigen::Vector4d z_ij_id = pudq_lib::pudq_identity();
             Eigen::Vector4d x_i_odom = vertices_pudq_[i];
-            Eigen::Vector4d x_j_odom = x_i_odom * z_ij_id;
+            Eigen::Vector4d x_j_odom = pudq_lib::pudq_compose(x_i_odom, z_ij_id);
             set_vertex(j, x_j_odom);
-        }
-    }
-}
-
-void PUDQGraph::construct_omega() {
-    //Constructs big omega matrix
-    Omega = Eigen::SparseMatrix<double, Eigen::RowMajor>(3*num_edges_, 3*num_edges_);
-
-    for (size_t ij = 0; ij < num_edges_; ij++) {
-        for (int i = 0; i < edge_vec_[ij].Omega_ij_pudq.rows(); i++) {
-            for (int j = 0; j < edge_vec_[ij].Omega_ij_pudq.cols(); j++) {
-                Omega.insert(3*ij+i, 3*ij+j) = edge_vec_[ij].Omega_ij_pudq(i,j);
-            }
         }
     }
 }
@@ -113,6 +117,17 @@ void PUDQGraph::add_vertex_true(Eigen::Vector4d vertex_pudq) {
     //Add PUDQ and equivalent Euclidean vertices to the graph
     vertices_true_pudq_.push_back(vertex_pudq);
     vertices_true_.push_back(pudq_to_pose(vertex_pudq));
+}
+
+bool PUDQGraph::edge_exists(size_t i, size_t j) {
+    // First make sure vertex i has any edges
+    if (adjacency_list_.count(i) > 0) {
+        // Check for an edge from i to j
+        return adjacency_list_[i].count(j);
+    } else {
+        // Vertex i has no edges
+        return false;
+    }
 }
 
 void PUDQGraph::add_edge(size_t i, size_t j, Eigen::Vector4d edge_pudq, Eigen::Matrix3d info_pudq) {
@@ -147,13 +162,13 @@ void PUDQGraph::add_edge(size_t i, size_t j, Eigen::Vector4d edge_pudq, Eigen::M
     edge_vec_.push_back(e);
 
     // Add edge to adjacency list (value is index of edge vector)
-    adjacency_list[i][j] = edge_vec_.size()-1;
+    adjacency_list_[i][j] = edge_vec_.size()-1;
 
     // Resize and insert new Omega_ij into big Omega matrix
-    Omega.conservativeResize(3*(num_edges_+1), 3*(num_edges_+1));
+    Omega_.conservativeResize(3*(num_edges_+1), 3*(num_edges_+1));
     for (int i = 0; i < info_pudq.rows(); i++) {
         for (int j = 0; j < info_pudq.cols(); j++) {
-            Omega.insert(3*num_edges_+i, 3*num_edges_+j) = info_pudq(i,j);
+            Omega_.insert(3*num_edges_+i, 3*num_edges_+j) = info_pudq(i,j);
         }
     }
 
@@ -183,14 +198,16 @@ void PUDQGraph::add_edge(size_t i, size_t j, Eigen::Vector4d edge_pudq, Eigen::M
 //     multi_edges_[i][agent_id][j] = e;
 // }
 
-bool PUDQGraph::edge_exists(size_t i, size_t j) {
-    // First make sure vertex i has any edges
-    if (adjacency_list.count(i) > 0) {
-        // Check for an edge from i to j
-        return adjacency_list[i].count(j);
-    } else {
-        // Vertex i has no edges
-        return false;
+void PUDQGraph::construct_omega() {
+    //Constructs big omega matrix
+    Omega_ = Eigen::SparseMatrix<double, Eigen::RowMajor>(3*num_edges_, 3*num_edges_);
+
+    for (size_t ij = 0; ij < num_edges_; ij++) {
+        for (int i = 0; i < edge_vec_[ij].Omega_ij_pudq.rows(); i++) {
+            for (int j = 0; j < edge_vec_[ij].Omega_ij_pudq.cols(); j++) {
+                Omega_.insert(3*ij+i, 3*ij+j) = edge_vec_[ij].Omega_ij_pudq(i,j);
+            }
+        }
     }
 }
 
@@ -198,19 +215,27 @@ void PUDQGraph::print_graph() {
     
     printf("Pose graph with %ld vertices and %ld edges:", num_vertices_, num_edges_);
 
-    for (auto it0 = edges_.begin(); it0 != edges_.end(); ++it0) {
-        std::map<size_t, Edge> edge = it0->second;
+    //Print all vertices
+    for (size_t i = 0; i < vertices_pudq_.size(); i++) {
+        std::cout << "(" << i << "): " << vertices_pudq_[i] << std::endl;
+    }
+
+    std::cout << std::endl;
+
+    //Print all edges
+    for (auto it0 = adjacency_list_.begin(); it0 != adjacency_list_.end(); ++it0) {
+        std::map<size_t, size_t> edge = it0->second;
         for (auto it1 = edge.begin(); it1 != edge.end(); ++it1) {
             std::string edge_str;
-            edge_str.append("(" + std::to_string(it0->first) + ", " + std::to_string(it1->first) + "): ");
+            edge_str.append("(" + std::to_string(it0->first) + "->" + std::to_string(it1->first) + "): ");
 
-            double p[3];
-            for (size_t i = 0; i < 3; i++) {
-                p[i] = it1->second.delta_pose(i);
-            }
-            edge_str.append("[" + std::to_string(p[0]) + ", " + std::to_string(p[1]) + ", " + std::to_string(p[2]) + "]\n");
+            // double p[3];
+            // for (int i=0; i<3; i++) {
+            //     p[i] = it1->second.delta_pose(i);
+            // }
+            // edge_str.append("[" + std::to_string(p[0]) + ", " + std::to_string(p[1]) + ", " + std::to_string(p[2]) + "]\n");
 
-            std::cout << edge_str << it1->second.information_pudq << std::endl;
+            std::cout << edge_str << edge_vec_[it1->second].z_ij_pudq << std::endl;
         }
     }
 }

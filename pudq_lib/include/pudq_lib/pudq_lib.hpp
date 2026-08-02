@@ -13,21 +13,27 @@
 
 #include <eigen3/Eigen/Core>
 #include <eigen3/Eigen/Dense>
+#include <eigen3/Eigen/SparseCore>
 
 namespace pudq_lib {
+    // Row-major sparse matrix type
+    typedef Eigen::SparseMatrix<double, Eigen::RowMajor> SparseMatrix;
+
     void unit_test();
+
+    void write_sparse_block(Eigen::SparseMatrix<double, Eigen::RowMajor> *M, Eigen::MatrixXd &m, int M_i, int M_j);
 
     std::string pudq_to_string(Eigen::Vector4d x);
 
     double sinc(double x);
 
-    Eigen::Matrix4d Q_L(Eigen::Vector4d x);
-    Eigen::Matrix4d Q_LLM(Eigen::Vector4d x);
+    Eigen::Matrix4d Q_L(const Eigen::Vector4d &x);
+    Eigen::Matrix4d Q_LLM(const Eigen::Vector4d &x);
 
-    Eigen::Vector4d pose_to_pudq(Eigen::Vector3d p);
-    Eigen::Vector3d pudq_to_pose(Eigen::Vector4d q);
-    Eigen::Matrix4d P_x(Eigen::Vector4d x);
-    Eigen::MatrixXd P_X_N(Eigen::VectorXd X);
+    Eigen::Vector4d pose_to_pudq(const Eigen::Vector3d &p);
+    Eigen::Vector3d pudq_to_pose(const Eigen::Vector4d &q);
+    Eigen::Matrix4d P_x(const Eigen::Vector4d &x);
+    SparseMatrix P_X_N(const std::vector<Eigen::Vector4d> &X);
 
     Eigen::Vector4d pudq_identity();
     Eigen::Vector4d random_pudq();

@@ -66,12 +66,12 @@ namespace pudq_pgo_lib {
 
         J_Edge_data *edge_data = static_cast<J_Edge_data *>(data);
 
-        x_i = edge_data->edge_ij.x_i;
-        x_j = edge_data->edge_ij.x_j;
-        z_ij = edge_data->edge_ij.z_ij;
+        Eigen::Vector4d x_i = edge_data->x_i;
+        Eigen::Vector4d x_j = edge_data->x_j;
+        Eigen::Vector4d z_ij = edge_data->edge_ij.z_ij_pudq;
 
         // Compute residual and Jacobians
-        r_ij = pudq_compose(pudq_inv(z_ij), pudq_mul(pudq_inv(x_i), x_j));
+        Eigen::Vector4d r_ij = pudq_compose(pudq_inv(z_ij), pudq_mul(pudq_inv(x_i), x_j));
     
         // x_i constants
         // mu_i    =  z_ij(1)*x_j(1) + z_ij(2)*x_j(2);
@@ -151,7 +151,7 @@ namespace pudq_pgo_lib {
         pthread_exit(static_cast<void *>(J_blk));
     }
 
-    std::tuple<std::vector<Eigen::VectorXd>, SparseMatrix, double, Eigen::VectorXd, SparseMatrix> rgn_gradhess(PUDQGraph &G) {
+    std::tuple<std::vector<Eigen::Vector4d>, SparseMatrix, double, Eigen::VectorXd, SparseMatrix> rgn_gradhess(PUDQGraph &G) {
 
         const int N = G.get_num_vertices();
         const int M = G.get_num_edges();
@@ -159,9 +159,10 @@ namespace pudq_pgo_lib {
         // std::cout << N << " vertices, " << M << " edges" << std::endl;
 
         // Get the entire vertex set
-        Eigen::VectorXd X = G.get_X();
+        std::vector<Eigen::Vector4d> X = G.get_vertices();
 
-        // Eigen::VectorXd E_vec = Eigen::VectorXd::Zero(6*M);
+        // Initialize edge residual vector
+        Eigen::VectorXd E_vec = Eigen::VectorXd::Zero(6*M);
 
         // pthread_t t_id[M];
 
@@ -202,15 +203,17 @@ namespace pudq_pgo_lib {
         //     delete edge;
         // }
 
-        SparseMatrix J_mat(6*M, 8*N);
+        SparseMatrix J_mat(3*M, 4*N);
         // J_mat.setFromTriplets(J_triplet_list.begin(), J_triplet_list.end());
+
+        Eigen::SparseMatrix<double, Eigen::RowMajor> Omega = G.get_Omega();
 
         // double F_X = 0.5*E_vec.transpose()*pg.Omega*E_vec;
         double F_X = 0.0;
 
-        Eigen::VectorXd egrad_X = J_mat.transpose()*G.Omega*E_vec;
+        Eigen::VectorXd egrad_X = J_mat.transpose()*Omega*E_vec;
 
-        SparseMatrix egnhess_X = J_mat.transpose()*G.Omega*J_mat;
+        SparseMatrix egnhess_X = J_mat.transpose()*Omega*J_mat;
         SparseMatrix P_X = P_X_N(X);
 
         Eigen::VectorXd rgrad_X = P_X*egrad_X;
@@ -221,7 +224,7 @@ namespace pudq_pgo_lib {
 
     // void optimize_rgn_fast(PUDQGraph *G, double tol, int max_iter) {
 
-    //     std::cout << "Optimizing over " << G->get_num_vertices() << " vertices, " << G->get_num_edges() << " edges" << std::endl;
+    //     std::cout << "Optimizing over " << G.get_num_vertices() << " vertices, " << G.get_num_edges() << " edges" << std::endl;
 
     //     //Initialize cost
     //     double F_prev = F_G_pudq(G);
@@ -229,18 +232,18 @@ namespace pudq_pgo_lib {
     //     for (int k = 0; k < max_iter; k++) {
 
     //         //Compute Euclidean gradient and Gauss-Newton Hessian
-    //         Eigen::VectorXd egrad_k = Eigen::VectorXd::Zero(4*G->get_num_vertices());
-    //         Eigen::MatrixXd gnhess_k = Eigen::MatrixXd::Zero(4*G->get_num_vertices(), 4*G->get_num_vertices());
+    //         Eigen::VectorXd egrad_k = Eigen::VectorXd::Zero(4*G.get_num_vertices());
+    //         Eigen::MatrixXd gnhess_k = Eigen::MatrixXd::Zero(4*G.get_num_vertices(), 4*G.get_num_vertices());
 
     //         //Loop through all edges
-    //         for (auto it_i = G->edges_.begin(); it_i != G->edges_.end(); ++it_i) {
+    //         for (auto it_i = G.edges_.begin(); it_i != G.edges_.end(); ++it_i) {
 
     //             //Get x_i
-    //             Eigen::Vector4d x_i = G->vertices_pudq_[it_i->first];
+    //             Eigen::Vector4d x_i = G.vertices_pudq_[it_i->first];
 
     //             for (auto it_j = it_i->second.begin(); it_j != it_i->second.end(); ++it_j) {
     //                 //Get x_j and z_ij
-    //                 Eigen::Vector4d x_j = G->vertices_pudq_[it_j->first];
+    //                 Eigen::Vector4d x_j = G.vertices_pudq_[it_j->first];
 
     //                 Eigen::Vector4d z_ij = it_j->second.delta_pose_pudq;
     //                 Eigen::Matrix3d Omega_ij = it_j->second.information_pudq;
@@ -332,7 +335,7 @@ namespace pudq_pgo_lib {
     //         //Todo: Multi-edges here?
 
     //         //Compute projection matrix
-    //         Eigen::MatrixXd P_X = P_X_N(G->get_X());
+    //         Eigen::MatrixXd P_X = P_X_N(G.get_vertices());
 
     //         //Compute Riemannian gradient
     //         Eigen::VectorXd rgrad_k = P_X * egrad_k;
@@ -344,18 +347,18 @@ namespace pudq_pgo_lib {
     //         // Eigen::VectorXd alpha_k = rhess_k.bdcSvd(Eigen::ComputeThinU | Eigen::ComputeThinV).solve(-rgrad_k);
     //         Eigen::VectorXd alpha_k = rhess_k.fullPivLu().solve(-rgrad_k);
 
-    //         for (int i = 1; i < G->get_num_vertices(); i++) {
-    //             Eigen::Vector4d x_i = G->vertices_pudq_[i];
+    //         for (int i = 1; i < G.get_num_vertices(); i++) {
+    //             Eigen::Vector4d x_i = G.vertices_pudq_[i];
 
     //             //RGN
-    //             G->set_vertex(i, Exp_x(x_i, alpha_k.segment(4*i, 4)));
+    //             G.set_vertex(i, Exp_x(x_i, alpha_k.segment(4*i, 4)));
 
     //             //RGD
     //             // G.set_vertex(i, Exp_x(x_i, -rgd_stepsize*rgrad_k.segment(4*i,4)));
     //         }
 
     //         //Compute the new gradient norm
-    //         double gradnorm = (P_X_N(G->get_X()) * egrad(G)).norm();
+    //         double gradnorm = (P_X_N(G.get_vertices()) * egrad(G)).norm();
             
     //         //Compute the new cost
     //         double F_k = F_G_pudq(G);
@@ -376,10 +379,22 @@ namespace pudq_pgo_lib {
 
     void optimize_rgn(PUDQGraph &G, double tol, int max_iter) {
 
-        std::cout << G->get_num_vertices() << " vertices, " << G->get_num_edges() << " edges" << std::endl;
+        std::cout << G.get_num_vertices() << " vertices, " << G.get_num_edges() << " edges" << std::endl;
 
-        //Initialize cost
-        double F_prev = F_G_pudq(G);
+        size_t N = G.get_num_vertices();
+
+        // Initialize opt variables
+        std::vector<Eigen::Vector4d> X_k = G.get_vertices();
+        SparseMatrix P_X(4*N, 4*N);
+        double F_k = F_G_pudq(G);
+        Eigen::VectorXd rgrad_k(4*N);
+        SparseMatrix rgnhess_k(4*N, 4*N);
+
+        SparseMatrix H_k(4*(N-1), 4*(N-1));
+        Eigen::VectorXd b_k(4*(N-1));
+    
+        Eigen::VectorXd S_k = Eigen::VectorXd::Zero(4*N);
+        Eigen::VectorXd S_k_trunc(4*(N-1));
 
         for (int k = 0; k < max_iter; k++) {
 
@@ -389,75 +404,93 @@ namespace pudq_pgo_lib {
             // Eigen::VectorXd egrad_k = egrad(G);
             // Eigen::MatrixXd gnhess_k = gnhess(G);
 
-            std::tie(X_k, P_X, F_k, rgrad_k, rgnhess_k) = udq_pgo_lib::rgn_gradhess(pg);
+
+
+            std::tie(X_k, P_X, F_k, rgrad_k, rgnhess_k) = rgn_gradhess(G);
 
             //Compute projection matrix
-            Eigen::MatrixXd P_X = P_X_N(G.get_X());
+            // Eigen::MatrixXd P_X = P_X_N(G.get_vertices());
 
             //Compute Riemannian gradient
-            Eigen::VectorXd rgrad_k = P_X * egrad_k;
+            // Eigen::VectorXd rgrad_k = P_X * egrad_k;
 
-            Eigen::MatrixXd rhess_k = P_X * gnhess_k * P_X;
-            rhess_k.block(0,0,4,4) += Eigen::Matrix4d::Identity();
+            // Eigen::MatrixXd rhess_k = P_X * gnhess_k * P_X;
+            // rhess_k.block(0,0,4,4) += Eigen::Matrix4d::Identity();
 
             // Solve LLS system with BCDSVD solver
             // Eigen::VectorXd alpha_k = rhess_k.bdcSvd(Eigen::ComputeThinU | Eigen::ComputeThinV).solve(-rgrad_k);
-            Eigen::VectorXd alpha_k = rhess_k.fullPivLu().solve(-rgrad_k);
+            // Eigen::VectorXd S_k = rgnhess_k.fullPivLu().solve(-rgrad_k);
 
-            for (int i = 1; i < G->get_num_vertices(); i++) {
-                Eigen::Vector4d x_i = G->vertices_pudq_[i];
+            Eigen::VectorXd S_k(4*N);
+
+            for (int i = 1; i < G.get_num_vertices(); i++) {
 
                 //RGN
-                G->set_vertex(i, Exp_x(x_i, alpha_k.segment(4*i, 4)));
+                G.set_vertex(i, Exp_x(X_k[i], S_k.segment(4*i, 4)));
 
                 //RGD
                 // G.set_vertex(i, Exp_x(x_i, -rgd_stepsize*rgrad_k.segment(4*i,4)));
             }
 
             //Compute the new gradient norm
-            double gradnorm = (P_X_N(G->get_X()) * egrad(G)).norm();
+            // double gradnorm = (P_X_N(G.get_vertices()) * egrad(G)).norm();
+            double gradnorm = 0.0;
             
             //Compute the new cost
-            double F_k = F_G_pudq(G);
+            // double F_k = F_G_pudq(G);
 
             printf("Iteration %d:\nGrad norm = %f\nCost = %f\n\n", k+1, gradnorm, F_k);
 
-            double delta_F = abs(F_k - F_prev);
-            if (delta_F < tol) {
+            // double delta_F = abs(F_k - F_prev);
+            if (gradnorm < tol) {
                 printf("RGN converged to within tolerance of %f\n", tol);
                 return;
             }
 
-            F_prev = F_k;
+            // F_prev = F_k;
         }
 
         printf("RGN max iterations reached.\n");
     }
 
-    double F_G_pudq(PUDQGraph &G) {
+    double F_G_pudq(const PUDQGraph &G) {
+
         double F = 0.0;
 
+        std::map<size_t, std::map<size_t, size_t>> adjacency_list = G.get_adjacency();
+        std::vector<PUDQGraph::Edge> edges = G.get_edges();
+
         //Loop through all edges
-        for (auto it0 = G->edges_.begin(); it0 != G->edges_.end(); ++it0) {
+        for (auto it0 = adjacency_list.begin(); it0 != adjacency_list.end(); ++it0) {
 
             //Get x_i
-            Eigen::Vector4d x_i = G->vertices_pudq_[it0->first];
+            int i = it0->first;
+            Eigen::Vector4d x_i = G.get_vertex(i);
 
             for (auto it1 = it0->second.begin(); it1 != it0->second.end(); ++it1) {
-                //Get x_j and z_ij
-                Eigen::Vector4d x_j = G->vertices_pudq_[it1->first];
 
-                Eigen::Vector4d z_ij = it1->second.delta_pose_pudq;
-                Eigen::Matrix3d Omega_ij = it1->second.information_pudq;
+                //Get x_j and z_ij
+                int j = it1->first;
+                Eigen::Vector4d x_j = G.get_vertex(j);
+                Eigen::Vector4d z_ij = edges[it1->second].z_ij_pudq;
+                Eigen::Matrix3d Omega_ij = edges[it1->second].Omega_ij_pudq;
 
                 //Compute residual
                 Eigen::Vector3d eij = e_ij(z_ij, x_i, x_j);
 
-                F += eij.transpose() * Omega_ij * eij;
+                double f_ij = eij.transpose() * Omega_ij * eij;
+
+                if (f_ij < 0) {
+                    std::cout << "fij = " << f_ij << std::endl;
+                    std::cout << Omega_ij.determinant() << std::endl;
+                    return 0;
+                }
+
+                F += f_ij;
             }
         }
 
-        return F / 2.0;
+        return 0.5*F;
     }
 
     double grad_term_1(double x) {
@@ -482,156 +515,156 @@ namespace pudq_pgo_lib {
     }
 
     //Jacobians
-    Eigen::MatrixXd A_ij(Eigen::Vector4d z_ij, Eigen::Vector4d x_i, Eigen::Vector4d x_j) {
-        //x_i constants
-        double mu_i    = x_j(0)*z_ij(0) + x_j(1)*z_ij(1);
-        double omega_i = -x_j(0)*z_ij(1) + x_j(1)*z_ij(0);
-        double eta_i   = -z_ij(1)*x_j(0)+z_ij(0)*x_j(1);
-        double kappa_i = -x_j(0)*z_ij(0)-x_j(1)*z_ij(1);
-        double alpha_1 = -x_j(0)*z_ij(2)-x_j(1)*z_ij(3)+x_j(2)*z_ij(0)+x_j(3)*z_ij(1);
-        double beta_1  = x_j(0)*z_ij(3)-x_j(1)*z_ij(2)-x_j(2)*z_ij(1)+x_j(3)*z_ij(0);
-        double xi_1    = -x_j(0)*z_ij(0)+x_j(1)*z_ij(1);
-        double zeta_1  = -z_ij(1)*x_j(0)-z_ij(0)*x_j(1);
-        double alpha_3 = -x_j(0)*z_ij(3)+x_j(1)*z_ij(2)-x_j(2)*z_ij(1)+x_j(3)*z_ij(0);
-        double beta_3  = -x_j(0)*z_ij(2)-x_j(1)*z_ij(3)-x_j(2)*z_ij(0)-x_j(3)*z_ij(1);
+    // Eigen::MatrixXd A_ij(Eigen::Vector4d z_ij, Eigen::Vector4d x_i, Eigen::Vector4d x_j) {
+    //     //x_i constants
+    //     double mu_i    = x_j(0)*z_ij(0) + x_j(1)*z_ij(1);
+    //     double omega_i = -x_j(0)*z_ij(1) + x_j(1)*z_ij(0);
+    //     double eta_i   = -z_ij(1)*x_j(0)+z_ij(0)*x_j(1);
+    //     double kappa_i = -x_j(0)*z_ij(0)-x_j(1)*z_ij(1);
+    //     double alpha_1 = -x_j(0)*z_ij(2)-x_j(1)*z_ij(3)+x_j(2)*z_ij(0)+x_j(3)*z_ij(1);
+    //     double beta_1  = x_j(0)*z_ij(3)-x_j(1)*z_ij(2)-x_j(2)*z_ij(1)+x_j(3)*z_ij(0);
+    //     double xi_1    = -x_j(0)*z_ij(0)+x_j(1)*z_ij(1);
+    //     double zeta_1  = -z_ij(1)*x_j(0)-z_ij(0)*x_j(1);
+    //     double alpha_3 = -x_j(0)*z_ij(3)+x_j(1)*z_ij(2)-x_j(2)*z_ij(1)+x_j(3)*z_ij(0);
+    //     double beta_3  = -x_j(0)*z_ij(2)-x_j(1)*z_ij(3)-x_j(2)*z_ij(0)-x_j(3)*z_ij(1);
 
-        //Atan2 method for computing half-angle phi
-        Eigen::Vector4d r_ij = pudq_compose(pudq_inv(z_ij), pudq_mul(pudq_inv(x_i), x_j));
+    //     //Atan2 method for computing half-angle phi
+    //     Eigen::Vector4d r_ij = pudq_compose(pudq_inv(z_ij), pudq_mul(pudq_inv(x_i), x_j));
 
-        double phi = get_phi_atan2(r_ij(1), r_ij(0));
-        double gamma = sinc(phi);
-        double f1 = f_1(phi);
+    //     double phi = get_phi_atan2(r_ij(1), r_ij(0));
+    //     double gamma = sinc(phi);
+    //     double f1 = f_1(phi);
 
-        double dphi_dxi0 = eta_i*r_ij(0) - mu_i*r_ij(1);
-        double dphi_dxi1 = kappa_i*r_ij(0) - omega_i*r_ij(1);
+    //     double dphi_dxi0 = eta_i*r_ij(0) - mu_i*r_ij(1);
+    //     double dphi_dxi1 = kappa_i*r_ij(0) - omega_i*r_ij(1);
 
-        //Initialize Aij matrix
-        Eigen::MatrixXd A = Eigen::MatrixXd::Zero(3,4);
+    //     //Initialize Aij matrix
+    //     Eigen::MatrixXd A = Eigen::MatrixXd::Zero(3,4);
         
-        A(0,0) = eta_i/gamma   + r_ij(1)*dphi_dxi0*f1;
-        A(0,1) = kappa_i/gamma + r_ij(1)*dphi_dxi1*f1;
+    //     A(0,0) = eta_i/gamma   + r_ij(1)*dphi_dxi0*f1;
+    //     A(0,1) = kappa_i/gamma + r_ij(1)*dphi_dxi1*f1;
 
-        A(1,0) = alpha_1/gamma + r_ij(2)*dphi_dxi0*f1;
-        A(1,1) = beta_1/gamma  + r_ij(2)*dphi_dxi1*f1;
-        A(1,2) = xi_1/gamma;
-        A(1,3) = zeta_1/gamma;
+    //     A(1,0) = alpha_1/gamma + r_ij(2)*dphi_dxi0*f1;
+    //     A(1,1) = beta_1/gamma  + r_ij(2)*dphi_dxi1*f1;
+    //     A(1,2) = xi_1/gamma;
+    //     A(1,3) = zeta_1/gamma;
 
-        A(2,0) = alpha_3/gamma + r_ij(3)*dphi_dxi0*f1;
-        A(2,1) = beta_3/gamma  + r_ij(3)*dphi_dxi1*f1;
-        A(2,2) = -zeta_1/gamma;
-        A(2,3) = xi_1/gamma;
+    //     A(2,0) = alpha_3/gamma + r_ij(3)*dphi_dxi0*f1;
+    //     A(2,1) = beta_3/gamma  + r_ij(3)*dphi_dxi1*f1;
+    //     A(2,2) = -zeta_1/gamma;
+    //     A(2,3) = xi_1/gamma;
 
-        return A;
-    }
+    //     return A;
+    // }
 
-    Eigen::MatrixXd B_ij(Eigen::Vector4d z_ij, Eigen::Vector4d x_i, Eigen::Vector4d x_j) {
-        //x_j constants
-        double mu_j    = x_i(0)*z_ij(0) - x_i(1)*z_ij(1);
-        double omega_j = x_i(0)*z_ij(1) + x_i(1)*z_ij(0);
-        double eta_j   = -z_ij(1)*x_i(0)-z_ij(0)*x_i(1);
-        double kappa_j =  z_ij(0)*x_i(0)-z_ij(1)*x_i(1);
-        double alpha_2 = -z_ij(2)*x_i(0)+z_ij(3)*x_i(1)-z_ij(0)*x_i(2)-z_ij(1)*x_i(3);
-        double beta_2  = -z_ij(3)*x_i(0)-z_ij(2)*x_i(1)+z_ij(1)*x_i(2)-z_ij(0)*x_i(3);
+    // Eigen::MatrixXd B_ij(Eigen::Vector4d z_ij, Eigen::Vector4d x_i, Eigen::Vector4d x_j) {
+    //     //x_j constants
+    //     double mu_j    = x_i(0)*z_ij(0) - x_i(1)*z_ij(1);
+    //     double omega_j = x_i(0)*z_ij(1) + x_i(1)*z_ij(0);
+    //     double eta_j   = -z_ij(1)*x_i(0)-z_ij(0)*x_i(1);
+    //     double kappa_j =  z_ij(0)*x_i(0)-z_ij(1)*x_i(1);
+    //     double alpha_2 = -z_ij(2)*x_i(0)+z_ij(3)*x_i(1)-z_ij(0)*x_i(2)-z_ij(1)*x_i(3);
+    //     double beta_2  = -z_ij(3)*x_i(0)-z_ij(2)*x_i(1)+z_ij(1)*x_i(2)-z_ij(0)*x_i(3);
 
-        //Atan2 method for computing half-angle phi
-        Eigen::Vector4d r_ij = pudq_compose(pudq_inv(z_ij), pudq_mul(pudq_inv(x_i), x_j));
+    //     //Atan2 method for computing half-angle phi
+    //     Eigen::Vector4d r_ij = pudq_compose(pudq_inv(z_ij), pudq_mul(pudq_inv(x_i), x_j));
 
-        double phi = get_phi_atan2(r_ij(1), r_ij(0));
-        double gamma = sinc(phi);
-        double f1 = f_1(phi);
+    //     double phi = get_phi_atan2(r_ij(1), r_ij(0));
+    //     double gamma = sinc(phi);
+    //     double f1 = f_1(phi);
 
-        double dphi_dxj0 = eta_j*r_ij(0) - mu_j*r_ij(1);
-        double dphi_dxj1 = kappa_j*r_ij(0) - omega_j*r_ij(1);
+    //     double dphi_dxj0 = eta_j*r_ij(0) - mu_j*r_ij(1);
+    //     double dphi_dxj1 = kappa_j*r_ij(0) - omega_j*r_ij(1);
 
-        //Initialize Bij matrix
-        Eigen::MatrixXd B = Eigen::MatrixXd::Zero(3,4);
+    //     //Initialize Bij matrix
+    //     Eigen::MatrixXd B = Eigen::MatrixXd::Zero(3,4);
 
-        B(0,0) = eta_j/gamma + r_ij(1)*dphi_dxj0*f1;
-        B(0,1) = kappa_j/gamma + r_ij(1)*dphi_dxj1*f1;
+    //     B(0,0) = eta_j/gamma + r_ij(1)*dphi_dxj0*f1;
+    //     B(0,1) = kappa_j/gamma + r_ij(1)*dphi_dxj1*f1;
 
-        B(1,0) = alpha_2/gamma + r_ij(2)*dphi_dxj0*f1;
-        B(1,1) = beta_2/gamma + r_ij(2)*dphi_dxj1*f1;
-        B(1,2) = kappa_j/gamma;
-        B(1,3) = -eta_j/gamma;
+    //     B(1,0) = alpha_2/gamma + r_ij(2)*dphi_dxj0*f1;
+    //     B(1,1) = beta_2/gamma + r_ij(2)*dphi_dxj1*f1;
+    //     B(1,2) = kappa_j/gamma;
+    //     B(1,3) = -eta_j/gamma;
 
-        B(2,0) = beta_2/gamma + r_ij(3)*dphi_dxj0*f1;
-        B(2,1) = -alpha_2/gamma + r_ij(3)*dphi_dxj1*f1;
-        B(2,2) = eta_j/gamma;
-        B(2,3) = kappa_j/gamma;
+    //     B(2,0) = beta_2/gamma + r_ij(3)*dphi_dxj0*f1;
+    //     B(2,1) = -alpha_2/gamma + r_ij(3)*dphi_dxj1*f1;
+    //     B(2,2) = eta_j/gamma;
+    //     B(2,3) = kappa_j/gamma;
 
-        return B;
-    }
+    //     return B;
+    // }
 
-    Eigen::VectorXd egrad(PUDQGraph *G) {
-        // printf("graph with %d vertices", num_vertices);
+    // Eigen::VectorXd egrad(PUDQGraph *G) {
+    //     // printf("graph with %d vertices", num_vertices);
 
-        Eigen::VectorXd egrad_F = Eigen::VectorXd::Zero(4*G->get_num_vertices());
+    //     Eigen::VectorXd egrad_F = Eigen::VectorXd::Zero(4*G.get_num_vertices());
 
-        //Loop through all edges
-        for (auto it_i = G->edges_.begin(); it_i != G->edges_.end(); ++it_i) {
+    //     //Loop through all edges
+    //     for (auto it_i = G.edges_.begin(); it_i != G.edges_.end(); ++it_i) {
 
-            //Get x_i
-            Eigen::Vector4d x_i = G->vertices_pudq_[it_i->first];
+    //         //Get x_i
+    //         Eigen::Vector4d x_i = G.vertices_pudq_[it_i->first];
 
-            for (auto it_j = it_i->second.begin(); it_j != it_i->second.end(); ++it_j) {
-                //Get x_j and z_ij
-                Eigen::Vector4d x_j = G->vertices_pudq_[it_j->first];
+    //         for (auto it_j = it_i->second.begin(); it_j != it_i->second.end(); ++it_j) {
+    //             //Get x_j and z_ij
+    //             Eigen::Vector4d x_j = G.vertices_pudq_[it_j->first];
 
-                Eigen::Vector4d z_ij = it_j->second.delta_pose_pudq;
-                Eigen::Matrix3d Omega_ij = it_j->second.information_pudq;
+    //             Eigen::Vector4d z_ij = it_j->second.delta_pose_pudq;
+    //             Eigen::Matrix3d Omega_ij = it_j->second.information_pudq;
 
-                //Compute residual and jacobians
-                Eigen::Vector3d eij = e_ij(z_ij, x_i, x_j);
-                Eigen::MatrixXd Aij = A_ij(z_ij, x_i, x_j);
-                Eigen::MatrixXd Bij = B_ij(z_ij, x_i, x_j);
+    //             //Compute residual and jacobians
+    //             Eigen::Vector3d eij = e_ij(z_ij, x_i, x_j);
+    //             Eigen::MatrixXd Aij = A_ij(z_ij, x_i, x_j);
+    //             Eigen::MatrixXd Bij = B_ij(z_ij, x_i, x_j);
 
-                //Compute gradient blocks
-                Eigen::Vector4d grad_i = Aij.transpose() * Omega_ij * eij;
-                Eigen::Vector4d grad_j = Bij.transpose() * Omega_ij * eij;
+    //             //Compute gradient blocks
+    //             Eigen::Vector4d grad_i = Aij.transpose() * Omega_ij * eij;
+    //             Eigen::Vector4d grad_j = Bij.transpose() * Omega_ij * eij;
 
-                //Update gradient blocks
-                egrad_F.segment(4*it_i->first, 4) += grad_i;
-                egrad_F.segment(4*it_j->first, 4) += grad_j;
-            }
-        }
+    //             //Update gradient blocks
+    //             egrad_F.segment(4*it_i->first, 4) += grad_i;
+    //             egrad_F.segment(4*it_j->first, 4) += grad_j;
+    //         }
+    //     }
 
-        return egrad_F;
-    }
+    //     return egrad_F;
+    // }
 
-    Eigen::MatrixXd gnhess(PUDQGraph *G) {
-        //Initialize Hessian approximation
-        Eigen::MatrixXd H_tilde = Eigen::MatrixXd::Zero(4*G->get_num_vertices(), 4*G->get_num_vertices());
+    // Eigen::MatrixXd gnhess(PUDQGraph *G) {
+    //     //Initialize Hessian approximation
+    //     Eigen::MatrixXd H_tilde = Eigen::MatrixXd::Zero(4*G.get_num_vertices(), 4*G.get_num_vertices());
 
-        //Loop through all edges
-        for (auto it_i = G->edges_.begin(); it_i != G->edges_.end(); ++it_i) {
+    //     //Loop through all edges
+    //     for (auto it_i = G.edges_.begin(); it_i != G.edges_.end(); ++it_i) {
 
-            //Get x_i
-            Eigen::Vector4d x_i = G->vertices_pudq_[it_i->first];
+    //         //Get x_i
+    //         Eigen::Vector4d x_i = G.vertices_pudq_[it_i->first];
 
-            for (auto it_j = it_i->second.begin(); it_j != it_i->second.end(); ++it_j) {
+    //         for (auto it_j = it_i->second.begin(); it_j != it_i->second.end(); ++it_j) {
 
-                //Get x_j and z_ij
-                Eigen::Vector4d x_j = G->vertices_pudq_[it_j->first];
-                Eigen::Vector4d z_ij = it_j->second.delta_pose_pudq;
-                Eigen::Matrix3d Omega_ij = it_j->second.information_pudq;
+    //             //Get x_j and z_ij
+    //             Eigen::Vector4d x_j = G.vertices_pudq_[it_j->first];
+    //             Eigen::Vector4d z_ij = it_j->second.delta_pose_pudq;
+    //             Eigen::Matrix3d Omega_ij = it_j->second.information_pudq;
 
-                //Compute jacobians
-                Eigen::MatrixXd Aij = A_ij(z_ij, x_i, x_j);
-                Eigen::MatrixXd Bij = B_ij(z_ij, x_i, x_j);
+    //             //Compute jacobians
+    //             Eigen::MatrixXd Aij = A_ij(z_ij, x_i, x_j);
+    //             Eigen::MatrixXd Bij = B_ij(z_ij, x_i, x_j);
 
-                //Compute Hessian blocks
-                Eigen::Matrix4d Hii_tilde = Aij.transpose() * Omega_ij * Aij;
-                Eigen::Matrix4d Hij_tilde = Aij.transpose() * Omega_ij * Bij;
-                Eigen::Matrix4d Hji_tilde = Hij_tilde.transpose();
-                Eigen::Matrix4d Hjj_tilde = Bij.transpose() * Omega_ij * Bij;
+    //             //Compute Hessian blocks
+    //             Eigen::Matrix4d Hii_tilde = Aij.transpose() * Omega_ij * Aij;
+    //             Eigen::Matrix4d Hij_tilde = Aij.transpose() * Omega_ij * Bij;
+    //             Eigen::Matrix4d Hji_tilde = Hij_tilde.transpose();
+    //             Eigen::Matrix4d Hjj_tilde = Bij.transpose() * Omega_ij * Bij;
 
-                H_tilde.block(4*it_i->first,4*it_i->first,4,4) += Hii_tilde;
-                H_tilde.block(4*it_i->first,4*it_j->first,4,4)  = Hij_tilde;
-                H_tilde.block(4*it_j->first,4*it_i->first,4,4)  = Hji_tilde;
-                H_tilde.block(4*it_j->first,4*it_j->first,4,4) += Hjj_tilde;
-            }
-        }
+    //             H_tilde.block(4*it_i->first,4*it_i->first,4,4) += Hii_tilde;
+    //             H_tilde.block(4*it_i->first,4*it_j->first,4,4)  = Hij_tilde;
+    //             H_tilde.block(4*it_j->first,4*it_i->first,4,4)  = Hji_tilde;
+    //             H_tilde.block(4*it_j->first,4*it_j->first,4,4) += Hjj_tilde;
+    //         }
+    //     }
 
-        return H_tilde;
-    }
+    //     return H_tilde;
+    // }
 }

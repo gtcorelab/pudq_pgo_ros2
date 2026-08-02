@@ -23,6 +23,8 @@ TurtlebotOdom::TurtlebotOdom() : Node("turtlebot_odom_node") {
 void TurtlebotOdom::imu_callback(const sensor_msgs::msg::Imu::SharedPtr imu_msg) {
     RCLCPP_INFO(this->get_logger(), "got imu");
 
+    (void) imu_msg;
+
     //Todo: Implement UDQ IMU integration
 }
 

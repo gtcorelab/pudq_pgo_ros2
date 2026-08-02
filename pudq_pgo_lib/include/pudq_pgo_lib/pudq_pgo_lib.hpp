@@ -31,7 +31,7 @@ namespace pudq_pgo_lib {
     };
 
     void *J_ij(void *data);
-    std::tuple<std::vector<Eigen::VectorXd>, SparseMatrix, double, Eigen::VectorXd, SparseMatrix> rgn_gradhess(PUDQGraph &pg);
+    std::tuple<std::vector<Eigen::Vector4d>, SparseMatrix, double, Eigen::VectorXd, SparseMatrix> rgn_gradhess(PUDQGraph &pg);
 
     void pgo_test();
     double grad_term_1(double x);
@@ -42,6 +42,7 @@ namespace pudq_pgo_lib {
     Eigen::Vector3d e_ij(Eigen::Vector4d z_ij, Eigen::Vector4d x_i, Eigen::Vector4d x_j);
     Eigen::MatrixXd A_ij(Eigen::Vector4d z_ij, Eigen::Vector4d x_i, Eigen::Vector4d x_j);
     Eigen::MatrixXd B_ij(Eigen::Vector4d z_ij, Eigen::Vector4d x_i, Eigen::Vector4d x_j);
+
     // Eigen::VectorXd egrad(PUDQGraph *G);
     // Eigen::MatrixXd gnhess(PUDQGraph *G);
 

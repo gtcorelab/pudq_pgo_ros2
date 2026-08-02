@@ -19,7 +19,7 @@ namespace pudq_lib {
         p_y(0) = static_cast <double> (rand()) / (static_cast <double> (RAND_MAX/10.0));
         p_y(1) = static_cast <double> (rand()) / (static_cast <double> (RAND_MAX/10.0));
         p_y(2) = static_cast <double> (rand()) / (static_cast <double> (RAND_MAX/10*M_PI));
-        Eigen::Vector4d y = pose_to_pudq(p_y);
+        Eigen::Vector4d y = pudq_mul(id, pose_to_pudq(p_y));
 
         Eigen::Vector3d log_1_x = Log_1(x);
         Eigen::Vector4d exp_log_1_x = Exp_1(log_1_x);
@@ -110,6 +110,15 @@ namespace pudq_lib {
         std::cout << "Eucl cov 3d:" << std::endl << eucl_cov_3d << std::endl << std::endl;
     }
 
+    // Copies a dense matrix into a big sparse one
+    void write_sparse_block(Eigen::SparseMatrix<double, Eigen::RowMajor> *M, Eigen::MatrixXd &m, int M_i, int M_j) {
+        for (int i = 0; i < m.rows(); i++) {
+            for (int j = 0; j < m.cols(); j++) {
+                M->insert(M_i+i, M_j+j) = m(i,j);
+            }
+        }
+    }
+
     std::string pudq_to_string(Eigen::Vector4d x) {
         std::string s;
         s.append("[").append(std::to_string(x(0))).append(",").append(std::to_string(x(1))).append(",").append(std::to_string(x(2))).append(",").append(std::to_string(x(3))).append("]");
@@ -120,7 +129,7 @@ namespace pudq_lib {
         return x == 0 ? 1.0 : sin(x)/x;
     }
 
-    Eigen::Matrix4d Q_L(Eigen::Vector4d x) {
+    Eigen::Matrix4d Q_L(const Eigen::Vector4d &x) {
         Eigen::Matrix4d Q;
         Q << x(0), -x(1), 0.0,   0.0,
              x(1),  x(0), 0.0,   0.0,
@@ -129,7 +138,7 @@ namespace pudq_lib {
         return Q;
     }
 
-    Eigen::Matrix4d Q_LLM(Eigen::Vector4d x) {
+    Eigen::Matrix4d Q_LLM(const Eigen::Vector4d &x) {
         Eigen::Matrix4d Q;
         Q << x(0),  x(1),  0.0,   0.0,
              -x(1), x(0),  0.0,   0.0,
@@ -138,27 +147,41 @@ namespace pudq_lib {
         return Q;
     }
 
-    Eigen::Matrix4d P_x(Eigen::Vector4d x) {
-        Eigen::Matrix4d P;
+    Eigen::Matrix4d P_x(const Eigen::Vector4d &x) {
+        Eigen::Matrix4d P = Eigen::Matrix4d::Identity();
         P.topLeftCorner(2,2) = Eigen::Matrix2d::Identity() - x.segment(0,2)*x.segment(0,2).transpose();
-        P.topRightCorner(2,2) = Eigen::Matrix2d::Zero();
-        P.bottomLeftCorner(2,2) = Eigen::Matrix2d::Zero();
-        P.bottomRightCorner(2,2) = Eigen::Matrix2d::Identity();
-
         return P;
     }
 
-    Eigen::MatrixXd P_X_N(Eigen::VectorXd X) {
-        Eigen::MatrixXd P = Eigen::MatrixXd::Zero(X.size(), X.size());
+    // Eigen::MatrixXd P_X_N(Eigen::VectorXd X) {
+    //     Eigen::MatrixXd P = Eigen::MatrixXd::Zero(X.size(), X.size());
 
-        for (int i = 0; i < (int)X.size()/4; i++) {
-            P.block(4*i,4*i,4,4) = P_x(X.segment(4*i,4));
+    //     for (int i = 0; i < (int)X.size()/4; i++) {
+    //         P.block(4*i,4*i,4,4) = P_x(X.segment(4*i,4));
+    //     }
+
+    //     return P;
+    // }
+
+    //Todo: Figure out upper triangular storage for symmetric matrices
+    SparseMatrix P_X_N(const std::vector<Eigen::Vector4d> &X) {
+
+        size_t N = X.size();
+        SparseMatrix *P = new SparseMatrix(4*N, 4*N);
+
+        for (size_t i = 0; i < N; i++) {
+            Eigen::MatrixXd P_i = P_x(X[i]);
+            write_sparse_block(P, P_i, 4*i, 4*i);
         }
 
-        return P;
+        // Todo: Fix this absolute BS
+        SparseMatrix P_ret = *P;
+        delete P;
+
+        return P_ret;
     }
 
-    Eigen::Vector4d pose_to_pudq(Eigen::Vector3d p) {
+    Eigen::Vector4d pose_to_pudq(const Eigen::Vector3d &p) {
         Eigen::Vector4d q;
 
         //Extract rotation angle and compute half-angle sin and cos
@@ -174,7 +197,7 @@ namespace pudq_lib {
         return pudq_normalize(q);
     }
 
-    Eigen::Vector3d pudq_to_pose(Eigen::Vector4d x) {
+    Eigen::Vector3d pudq_to_pose(const Eigen::Vector4d &x) {
         Eigen::Vector3d p;
         
         Eigen::Matrix2d Q_r;
