@@ -3,17 +3,17 @@
 
 #include <rclcpp/rclcpp.hpp>
 
+#include <pthread.h>
+
+#include <pudq_lib/pudq_lib.hpp>
+#include <pudq_pgo_lib/PUDQGraph.hpp>
+
 #include <eigen3/Eigen/Core>
 #include <eigen3/Eigen/Dense>
 #include <eigen3/Eigen/Sparse>
 #include <eigen3/Eigen/SparseCore>
 
-#include <pthread.h>
-
-#include <pudq_lib/pudq_lib.hpp>
-// #include <pudq_msgs/msg/pudq_graph.hpp>
-
-#include <pudq_pgo_lib/PUDQGraph.hpp>
+#include "OsqpEigen/OsqpEigen.h"
 
 namespace pudq_pgo_lib {
 
@@ -47,6 +47,7 @@ namespace pudq_pgo_lib {
     // Eigen::MatrixXd gnhess(PUDQGraph *G);
 
     void optimize_rgn(PUDQGraph &G, double tol, int max_iter);
+    void optimize_rlm(PUDQGraph &G, double tol, int max_iter);
     // void optimize_rgn_fast(PUDQGraph *G, double tol, int max_iter);
 }
 

@@ -63,6 +63,9 @@ PUDQGraphManager::PUDQGraphManager() : Node("pudq_graph_manager_node") {
 
         // Start a 1 second viz update timer
         // viz_timer_ = this->create_wall_timer(1s, std::bind(&PUDQGraphManager::viz_timer_callback, this));
+
+        pudq_pgo_lib::optimize_rlm(G, 1e-4, 100);
+
     } else {
         // Initialize graph to identity vertex
         initialize_graph();
@@ -208,8 +211,6 @@ int PUDQGraphManager::read_g2o_file() {
     // Note: this part is temporary, for demonstration purposes!
     // update_odom_viz();
     // update_estimate_viz();
-
-    pudq_pgo_lib::optimize_rgn(G, 1e-4, 100);
 
     // update_odom_viz();
     // update_estimate_viz();

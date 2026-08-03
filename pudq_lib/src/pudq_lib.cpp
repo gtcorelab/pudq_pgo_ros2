@@ -153,16 +153,6 @@ namespace pudq_lib {
         return P;
     }
 
-    // Eigen::MatrixXd P_X_N(Eigen::VectorXd X) {
-    //     Eigen::MatrixXd P = Eigen::MatrixXd::Zero(X.size(), X.size());
-
-    //     for (int i = 0; i < (int)X.size()/4; i++) {
-    //         P.block(4*i,4*i,4,4) = P_x(X.segment(4*i,4));
-    //     }
-
-    //     return P;
-    // }
-
     //Todo: Figure out upper triangular storage for symmetric matrices
     SparseMatrix P_X_N(const std::vector<Eigen::Vector4d> &X) {
 
@@ -301,6 +291,15 @@ namespace pudq_lib {
         // Eigen::Vector4d exp_x = pudq_mul(x, Exp_1(x_inv_y_t.segment(1,3)));
 
         return exp_x;
+    }
+
+    std::vector<Eigen::Vector4d> Exp_X_N(std::vector<Eigen::Vector4d> &X, Eigen::VectorXd &Y_t) {
+        std::vector<Eigen::Vector4d> exp_x_n;
+        for (size_t i = 0; i < X.size(); i++) {
+            exp_x_n.push_back(Exp_x(X[i], Y_t.segment(4*i, 4)));
+        }
+
+        return exp_x_n;
     }
 
     Eigen::Vector3d Lie_Log_1(Eigen::Vector4d r) {

@@ -52,6 +52,8 @@ public:
     void odom_init();
 
     void set_vertex(size_t i, Eigen::Vector4d vertex_pudq);
+    void set_vertices(std::vector<Eigen::Vector4d> &X);
+
     void add_vertex(Eigen::Vector4d vertex_pudq);
     void add_vertex_true(Eigen::Vector4d vertex_pudq);
 

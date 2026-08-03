@@ -251,8 +251,21 @@ namespace pudq_pgo_lib {
         // b_k = rgrad_k.tail(4*(N-1));
 
         // Eigen::SparseLU<SparseMatrix> solver;
-        Eigen::SimplicialLDLT<SparseMatrix> solver;
-        
+        // Eigen::SimplicialLDLT<SparseMatrix> solver;
+
+        // instantiate the solver
+        OsqpEigen::Solver solver;
+        solver.data()->setNumberOfVariables(4*(N-1));
+        solver.data()->setNumberOfConstraints(0);
+
+        solver.settings()->setVerbosity(false);
+
+        // Set custom convergence tolerances
+        solver.settings()->setAbsoluteTolerance(1e-8);
+        solver.settings()->setRelativeTolerance(1e-8);
+        solver.settings()->setPrimalInfeasibilityTolerance(1e-8);
+        solver.settings()->setDualInfeasibilityTolerance(1e-8);
+
         for (int k = 0; k < max_iter; k++) {
 
             //Compute Riemannian gradient and Gauss-Newton Hessian
@@ -263,22 +276,54 @@ namespace pudq_pgo_lib {
             b_k = rgrad_k.tail(4*(N-1));
 
             if (k == 0) {
-                // Analyze the pattern during the first iteration
-                solver.analyzePattern(H_k);
+                if (!solver.data()->setHessianMatrix(H_k)) {
+                    std::fprintf(stderr, "Error setting Hessian!\n");
+                    return;
+                }
+
+                if (!solver.data()->setGradient(b_k)) {
+                    std::fprintf(stderr, "Error setting Gradient!\n");
+                    return;
+                }
+
+                // instantiate the solver
+                if (!solver.initSolver()) {
+                    std::fprintf(stderr, "Error initializing solver!\n");
+                    return;
+                }
+            } else {
+                if (!solver.updateHessianMatrix(H_k)) {
+                    std::fprintf(stderr, "Error updating Hessian!\n");
+                    return;
+                }
+
+                if (!solver.updateGradient(b_k)) {
+                    std::fprintf(stderr, "Error updating Gradient!\n");
+                    return;
+                }
             }
 
-            solver.compute(H_k);
-            
-            if (solver.info() != Eigen::Success) {
-                std::fprintf(stderr, "WARNING: RLM Sparse factorization failed!\n");
-                continue; 
+            // solve the QP problem
+            if (solver.solveProblem() != OsqpEigen::ErrorExitFlag::NoError) {
+                std::fprintf(stderr, "Solver failed!\n");
+                return;
             }
 
-            S_k_trunc = solver.solve(-b_k);
-            double residual = (H_k*S_k_trunc + b_k).norm();
-            std::cout << "Linear Residual = " << residual << std::endl;
+            // if (k == 0) {
+            //     // Analyze the pattern during the first iteration
+            //     solver.analyzePattern(H_k);
+            // }
+            // solver.compute(H_k);
+            // if (solver.info() != Eigen::Success) {
+            //     std::fprintf(stderr, "WARNING: RLM Sparse factorization failed!\n");
+            //     continue; 
+            // }
+            // S_k_trunc = solver.solve(-b_k);
 
-            return;
+            S_k_trunc = solver.getSolution();
+
+            double linear_residual = (H_k*S_k_trunc + b_k).norm();
+            std::cout << "Linear residual ||H*S-b|| = " << linear_residual << std::endl;
 
             S_k.tail(4*(N-1)) = S_k_trunc;
             S_k = P_X*S_k;
@@ -309,6 +354,131 @@ namespace pudq_pgo_lib {
         }
 
         printf("RGN max iterations reached.\n");
+    }
+
+    void optimize_rlm(PUDQGraph &G, double tol, int max_iter) {
+
+        std::cout << G.get_num_vertices() << " vertices, " << G.get_num_edges() << " edges" << std::endl;
+
+        size_t N = G.get_num_vertices();
+
+        // Initialize opt variables
+        std::vector<Eigen::Vector4d> X_k = G.get_vertices();
+        SparseMatrix P_X(4*N, 4*N);
+        double F_k = F_G_pudq(G);
+        Eigen::VectorXd rgrad_k(4*N);
+        SparseMatrix rgnhess_k(4*N, 4*N);
+
+        SparseMatrix H_k(4*(N-1), 4*(N-1));
+        Eigen::VectorXd b_k(4*(N-1));
+    
+        Eigen::VectorXd S_k = Eigen::VectorXd::Zero(4*N);
+        Eigen::VectorXd S_k_trunc(4*(N-1));
+
+        SparseMatrix eye(8*(N-1), 8*(N-1));
+        eye.setIdentity();
+
+        // Compute initial performance metrics
+        std::tie(X_k, P_X, F_k, rgrad_k, rgnhess_k) = rgn_gradhess(G);
+        double gradnorm_k = rgrad_k.norm();
+
+        fprintf(stdout, "RLM Initialization: F_k = %.4f, ||g_k|| = %.4f\n", F_k, gradnorm_k);
+
+        return;
+
+        // instantiate the solver
+        OsqpEigen::Solver solver;
+        solver.data()->setNumberOfVariables(4*(N-1));
+        solver.data()->setNumberOfConstraints(0);
+        solver.settings()->setVerbosity(false);
+        solver.settings()->setAbsoluteTolerance(1e-8);
+        solver.settings()->setRelativeTolerance(1e-8);
+        solver.settings()->setPrimalInfeasibilityTolerance(1e-8);
+        solver.settings()->setDualInfeasibilityTolerance(1e-8);
+
+ 
+        // RLM parameters
+        double mu_min = 1e-12;
+        double mu_k = mu_min;
+        double v = 2.0;
+        double eta = 0.1;
+
+        int max_iter = 500;
+        bool converged = false;
+
+        double epsilon_g = 0.01;
+
+        // Set lambda to zero bc it gets set at every iteration inside the loop
+        double lambda_k = 0;
+
+        int k = 0;
+        bool last_accepted = true;
+
+        for (k = 0; k < max_iter; k++) {
+
+            // If the last step was rejected, then only mu has changed.
+            if (last_accepted) {
+                std::tie(X_k, P_X, F_k, rgrad_k, rgnhess_k) = udq_pgo_lib::rgn_gradhess(pg);
+            }
+            
+            // Start updating analytics after the first iteration is complete
+            if (k > 0) {
+                // Compute convergence properties
+                double gradnorm_k = rgrad_k.norm();
+
+                fprintf(stdout, "Iteration %d: F_k = %.4f, ||g_k|| = %.4f, lambda = %.4e\n", k, F_k, gradnorm_k, lambda_k);
+            }
+            
+            if (rgrad_k.norm() < epsilon_g) {
+                std::cout << "RLM converged in " << k << " iterations." << std::endl;
+                converged = true;
+                break;
+            }
+
+            lambda_k = 2*mu_k*F_k;
+
+            H_k = rgnhess_k.block(4, 4, 4*(N-1), 4*(N-1)) + lambda_k*eye;
+            b_k = rgrad_k.tail(4*(N-1));
+            // ooqpei::OoqpEigenInterface::solve(H_k, b_k, S_k_trunc);
+
+            // Check linear residual
+            double linear_residual = (H_k*S_k_trunc + b_k).norm();
+            // std::cout << "Linear residual ||H*S-b|| = " << linear_residual << std::endl;
+
+            S_k.tail(4*(N-1)) = S_k_trunc;
+            S_k = P_X*S_k;
+
+            std::vector<Eigen::Vector4d> Exp_S_k = pudq_lib::Exp_X_N(X_k, S_k);
+
+            G.set_vertices(Exp_S_k);
+            double F_new = F_udq(G);
+
+            // Calculate the predicted reduction from the quadratic model
+            double predicted_reduction = -rgrad_k.dot(S_k) - 0.5 * S_k.dot(rgnhess_k * S_k) - 0.5 * lambda_k*S_k.dot(S_k);
+            double actual_reduction = F_k - F_new;
+            double rho = actual_reduction / predicted_reduction;
+
+            // std::cout << "Predicted = " << predicted_reduction << ", Actual = " <<  actual_reduction << ", rho = " << rho << std::endl;
+            
+            if (rho > eta) {
+                // Accept the step
+                mu_k = std::max(mu_k / v, mu_min);
+
+                last_accepted = true;
+            } else {
+                // Reject the step
+                pg.set_vertices(X_k);
+                mu_k = mu_k * v;
+
+                // We reverted X_k, so there's no need to recompute the gradient
+                last_accepted = false;
+            }
+        }
+
+        if (!converged) {
+            std::cerr << "RLM DID NOT CONVERGE! I REPEAT, RLM DID NOT CONVERGE!" << std::endl;
+            res.numiter = k;
+        }
     }
 
     double F_G_pudq(const PUDQGraph &G) {

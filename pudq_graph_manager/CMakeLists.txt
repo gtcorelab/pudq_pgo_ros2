@@ -10,8 +10,7 @@ add_compile_options(-flto=auto)
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
-
-find_package(Eigen3 REQUIRED NO_MODULE)
+find_package(ament_cmake_ros REQUIRED)
 
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
@@ -25,6 +24,10 @@ find_package(pudq_lib REQUIRED)
 find_package(pudq_pgo_lib REQUIRED)
 find_package(pudq_msgs REQUIRED)
 
+find_package(OpenMP REQUIRED)
+find_package(Eigen3 REQUIRED NO_MODULE)
+find_package(OsqpEigen REQUIRED)
+
 add_executable(
     ${PROJECT_NAME}_node
     src/${PROJECT_NAME}_node.cpp
@@ -32,21 +35,26 @@ add_executable(
     include/PUDQGraphManager.hpp
 )
 
-ament_target_dependencies(
-    ${PROJECT_NAME}_node
-    Eigen3
-    rclcpp
-    std_msgs
-    std_srvs
-    geometry_msgs
-    visualization_msgs
-    tf2
-    tf2_ros
-    tf2_geometry_msgs
-    pudq_lib
-    pudq_pgo_lib
-    pudq_msgs
+target_link_libraries(
+    ${PROJECT_NAME}_node PUBLIC
+    rclcpp::rclcpp
+    ${std_msgs_TARGETS}
+    ${std_srvs_TARGETS}
+    ${geometry_msgs_TARGETS}
+    ${visualization_msgs_TARGETS}
+    ${tf2_TARGETS}
+    ${tf2_ros_TARGETS}
+    ${tf2_geometry_msgs_TARGETS}
+    ${pudq_lib_TARGETS}
+    ${pudq_pgo_lib_TARGETS}
+    ${pudq_msgs_TARGETS}
+    Eigen3::Eigen
+    osqp::osqp
+    OsqpEigen::OsqpEigen
 )
+
+set_target_properties(${PROJECT_NAME}_node PROPERTIES COMPILE_FLAGS ${OpenMP_CXX_FLAGS})
+set_target_properties(${PROJECT_NAME}_node PROPERTIES LINK_FLAGS "-fopenmp")
 
 target_include_directories(
     ${PROJECT_NAME}_node PUBLIC
