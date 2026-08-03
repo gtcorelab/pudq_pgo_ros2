@@ -21,8 +21,8 @@ namespace pudq_lib {
         p_y(2) = static_cast <double> (rand()) / (static_cast <double> (RAND_MAX/10*M_PI));
         Eigen::Vector4d y = pudq_mul(id, pose_to_pudq(p_y));
 
-        Eigen::Vector3d log_1_x = Log_1(x);
-        Eigen::Vector4d exp_log_1_x = Exp_1(log_1_x);
+        Eigen::Vector3d log_1_x = Lie_Log_1(x);
+        Eigen::Vector4d exp_log_1_x = Lie_Exp_1(log_1_x);
 
         Eigen::Vector4d log_x_y = Log_x(x, y);
         Eigen::Vector4d px_log_x_y = P_x(x) * log_x_y;
@@ -269,7 +269,7 @@ namespace pudq_lib {
     //     }
     // }
 
-    Eigen::Vector4d Exp_1(Eigen::Vector3d x_t) {
+    Eigen::Vector4d Lie_Exp_1(Eigen::Vector3d x_t) {
         double gamma = sinc(x_t(0));
 
         Eigen::Vector4d q;
@@ -283,13 +283,27 @@ namespace pudq_lib {
         //Project y_t into TxM
         Eigen::Vector4d y_TxM = P_x(x) * y_t;
 
-        Eigen::Vector4d x_inv_y_t = pudq_mul(pudq_inv(x), y_t);
-        Eigen::Vector4d exp_x = pudq_mul(x, Exp_1(x_inv_y_t.segment(1,3)));
+        Eigen::Matrix2d Q_Lx;
+        Q_Lx << x(0), -x(1), x(1), x(0);
+
+        double phi_r = -x(1)*y_TxM(0) + x(0)*y_TxM(1);
+
+        Eigen::Vector2d R_phi;
+        R_phi << cos(phi_r), sin(phi_r);
+
+        Eigen::Vector2d exp_yr = Q_Lx*R_phi;
+
+        Eigen::Vector4d exp_x;
+        exp_x.head(2) = exp_yr;
+        exp_x.tail(2) = x.tail(2) + y_TxM.tail(2);
+
+        // Eigen::Vector4d x_inv_y_t = pudq_mul(pudq_inv(x), y_t);
+        // Eigen::Vector4d exp_x = pudq_mul(x, Exp_1(x_inv_y_t.segment(1,3)));
 
         return exp_x;
     }
 
-    Eigen::Vector3d Log_1(Eigen::Vector4d r) {
+    Eigen::Vector3d Lie_Log_1(Eigen::Vector4d r) {
         double phi = get_phi_atan2(r(1), r(0));
         double gamma = sinc(phi);
         Eigen::Vector3d x_t = r.segment(1,3)/gamma;
@@ -298,12 +312,21 @@ namespace pudq_lib {
     }
 
     Eigen::Vector4d Log_x(Eigen::Vector4d x, Eigen::Vector4d y_m) {
-        Eigen::Vector4d x_inv_y = pudq_mul(pudq_inv(x), y_m);
 
-        Eigen::Vector4d pad_log_1;
-        pad_log_1(0) = 0.0;
-        pad_log_1.segment(1,3) = Log_1(x_inv_y);
-        Eigen::Vector4d log_x =  pudq_mul(x, pad_log_1);
+        Eigen::Matrix2d Q_Lx, Q_LMx;
+        Q_Lx << x(0), -x(1), x(1), x(0);
+        Q_LMx << x(0), x(1), -x(1), x(0);
+
+        Eigen::Vector2d yr_id = Q_LMx*y_m.tail(2);
+        double phi_y = get_phi_atan2(yr_id(1), yr_id(0));
+
+        Eigen::Vector2d pad_log_yr;
+        pad_log_yr << 0, phi_y;
+        Eigen::Vector2d log_yr = Q_Lx*pad_log_yr;
+
+        Eigen::Vector4d log_x;
+        log_x.head(2) = log_yr;
+        log_x.tail(2) = y_m.tail(2) - x.tail(2);
 
         return log_x;
     }

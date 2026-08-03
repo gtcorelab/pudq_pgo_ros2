@@ -12,7 +12,7 @@ PUDQGraphManager::PUDQGraphManager() : Node("pudq_graph_manager_node") {
     RCLCPP_INFO(this->get_logger(), "Initializing PUDQ Graph Manager Node");
 
     //Seed the RNG
-    srand (static_cast <unsigned> (time(0)));
+    srand(static_cast <unsigned> (time(0)));
 
     robot_name_ = std::string(this->get_namespace()).substr(1);
 
@@ -45,7 +45,6 @@ PUDQGraphManager::PUDQGraphManager() : Node("pudq_graph_manager_node") {
     initialize_viz();
 
     //Graph visualization publishers
-
     vertices_publisher_ = this->create_publisher<geometry_msgs::msg::PoseArray>("vertices", rclcpp::ServicesQoS());
     edge_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>("edge_viz", rclcpp::ServicesQoS());
     odom_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>("odom_viz", rclcpp::ServicesQoS());
@@ -63,7 +62,7 @@ PUDQGraphManager::PUDQGraphManager() : Node("pudq_graph_manager_node") {
         read_g2o_file();
 
         // Start a 1 second viz update timer
-        viz_timer_ = this->create_wall_timer(1s, std::bind(&PUDQGraphManager::viz_timer_callback, this));
+        // viz_timer_ = this->create_wall_timer(1s, std::bind(&PUDQGraphManager::viz_timer_callback, this));
     } else {
         // Initialize graph to identity vertex
         initialize_graph();
@@ -77,7 +76,7 @@ PUDQGraphManager::PUDQGraphManager() : Node("pudq_graph_manager_node") {
         // lc_subscriber_ = this->create_subscription<pudq_msgs::msg::PUDQEdge>("pudq_loop_closure", 10, std::bind(&PUDQGraphManager::lc_edge_callback, this, _1));
     }
 
-    //Distributed stuff
+    // Distributed stuff
     // map_pudq_ = pudq_identity();
     // map_frame_init_ = false;
 }
@@ -86,61 +85,12 @@ void PUDQGraphManager::initialize_graph() {
     G.clear();
 
     //Always initialize graph with fixed identity vertex
-    G.add_vertex(pudq_identity());
-    
+    G.add_vertex(pudq_lib::pudq_identity());
+
     //Initialize odom to identity as well
-    odom_vertices_.push_back(pudq_to_pose(pudq_identity()));
+    odom_vertices_.push_back(pudq_to_pose(pudq_lib::pudq_identity()));
 
     RCLCPP_WARN(this->get_logger(),  "Pose graph initialized");
-}
-
-void PUDQGraphManager::init_g2o_vertices(int num_vertices) {
-    // Initialize all g2o vertices to identity
-    for (int i = 0; i < num_vertices; i++) {
-        G.add_vertex(pudq_identity());  
-    }
-}
-
-void PUDQGraphManager::odom_init() {
-
-    // Fix the origin to identity
-    G.set_vertex(0, pudq_identity());
-    for (size_t j = 1; j < G.vertices_pudq_.size(); j++) {
-        
-        size_t i = j-1;
-
-        // Make sure there exists an odom edge from i to j
-        bool odom_edge_exists = false;
-        if (G.edges_.count(i) > 0 || G.edges_.count(j) > 0) {
-            if (G.edges_[i].count(j) > 0) {
-                odom_edge_exists = true;
-
-                // Propogate odom via x_j = x_i comp. z_ij
-                Eigen::Vector4d x_i_odom = G.vertices_pudq_[i];
-                Eigen::Vector4d x_j_odom = pudq_compose(x_i_odom, G.edges_[i][j].delta_pose_pudq);
-                G.set_vertex(j, x_j_odom);
-            } else if (G.edges_[j].count(i) > 0) {
-                // Account for reverse odom edges in some datasets
-                odom_edge_exists = true;
-
-                // Propogate odom via x_j = x_i comp. z_ij^(-1)
-                Eigen::Vector4d x_i_odom = G.vertices_pudq_[i];
-                Eigen::Vector4d x_j_odom = pudq_compose(x_i_odom, G.edges_[i][j].delta_pose_pudq.inverse());
-                G.set_vertex(j, x_j_odom);
-            }
-        }
-
-        if (!odom_edge_exists) {
-            // Don't print this warning for now bc some datasets are just FUBARed
-            fprintf(stderr, "Warning: Missing odom edge from %ld->%ld! Assuming identity.\n", i, j);
-
-            //Propogate odom via x_j = x_i comp. z_ij
-            Eigen::Vector4d z_ij_id = pudq_identity();
-            Eigen::Vector4d x_i_odom = G.vertices_pudq_[i];
-            Eigen::Vector4d x_j_odom = pudq_compose(x_i_odom, z_ij_id);
-            G.set_vertex(j, x_j_odom);
-        }
-    }
 }
 
 int PUDQGraphManager::read_g2o_file() {
@@ -218,7 +168,7 @@ int PUDQGraphManager::read_g2o_file() {
     }
 
     size_t num_vertices = max_vertex+1;
-    init_g2o_vertices(num_vertices);
+    G.init_vertices(num_vertices);
 
     // If vertices were included, initialize the graph with them
     if (init_vertices.size() > 0) {
@@ -240,25 +190,33 @@ int PUDQGraphManager::read_g2o_file() {
     } else {
         // Not included, initialize vertices from odometry
         std::cout << "Vertices not included... initializing from odometry.\n" << std::endl;
-        odom_init();
+        G.odom_init();
     }
 
     std::cout << "Read pose graph with " << G.get_num_vertices() << " vertices and " << G.get_num_edges() << " edges from " << g2o_file_ << "." << std::endl;
 
     g2ofile.close();
 
+    G.odom_init();
+
     // Update odom vertices at initialization
-    for (size_t i = 0; i < G.get_num_vertices(); i++) {
-        odom_vertices_.push_back(G.vertices_[i]);
+    std::vector<Eigen::Vector3d> vertices_eucl = G.get_vertices_eucl();
+    for (size_t i = 0; i < vertices_eucl.size(); i++) {
+        odom_vertices_.push_back(vertices_eucl[i]);
     }
-    
-    update_odom_viz();
-    update_estimate_viz();
 
-    pudq_pgo_lib::optimize_rgn_fast(&G, 1e-5, 10);
+    // Note: this part is temporary, for demonstration purposes!
+    // update_odom_viz();
+    // update_estimate_viz();
 
-    update_odom_viz();
-    update_estimate_viz();
+    pudq_pgo_lib::optimize_rgn(G, 1e-4, 100);
+
+    // update_odom_viz();
+    // update_estimate_viz();
+
+    // double F = pudq_pgo_lib::F_G_pudq(G);
+    // std::cout << "F(X) = " << F << std::endl;
+    // G.print_graph();
 
     return 0;
 }
@@ -314,18 +272,20 @@ void PUDQGraphManager::update_estimate_viz() {
     vertices_msg.header.stamp = now;
     vertices_msg.header.frame_id = map_frame_id_;
 
-    for (size_t i = 0; i < G.vertices_.size(); i++) {
+    std::vector<Eigen::Vector3d> vertices = G.get_vertices_eucl();
+
+    for (size_t i = 0; i < vertices.size(); i++) {
         geometry_msgs::msg::Pose vertex_msg;
-        vertex_msg.position.x = G.vertices_[i](0);
-        vertex_msg.position.y = G.vertices_[i](1);
-        double theta_i = G.vertices_[i](2);
+        vertex_msg.position.x = vertices[i](0);
+        vertex_msg.position.y = vertices[i](1);
+        double theta_i = vertices[i](2);
         vertex_msg.orientation.w = cos(theta_i/2);
         vertex_msg.orientation.z = sin(theta_i/2);
         vertices_msg.poses.push_back(vertex_msg);
     }
     vertices_publisher_->publish(vertices_msg);
 
-    if (G.vertices_.size() > 1) {
+    if (vertices.size() > 1) {
         edges_marker_.header.stamp = now;
 
         if (est_marker_init_) {
@@ -338,13 +298,14 @@ void PUDQGraphManager::update_estimate_viz() {
             est_marker_init_ = true;
         }
 
-        //Plot edges (odom and intra-lc) and loop closures
-        for (auto it0 = G.edges_.begin(); it0 != G.edges_.end(); ++it0) {
+        // Plot edges (odom and intra-lc) and loop closures
+        std::map<size_t, std::map<size_t, size_t>> adjacency_list = G.get_adjacency();
+        for (auto it0 = adjacency_list.begin(); it0 != adjacency_list.end(); ++it0) {
 
             //Prepare edge i vertex
             geometry_msgs::msg::Point edge_vertex_i;
-            edge_vertex_i.x = G.vertices_[it0->first](0);
-            edge_vertex_i.y = G.vertices_[it0->first](1);
+            edge_vertex_i.x = vertices[it0->first](0);
+            edge_vertex_i.y = vertices[it0->first](1);
             edge_vertex_i.z = 0.0;
 
             for (auto it1 = it0->second.begin(); it1 != it0->second.end(); ++it1) {
@@ -355,8 +316,8 @@ void PUDQGraphManager::update_estimate_viz() {
                 edges_marker_.points.push_back(edge_vertex_i);
 
                 geometry_msgs::msg::Point edge_vertex_j;
-                edge_vertex_j.x = G.vertices_[it1->first](0);
-                edge_vertex_j.y = G.vertices_[it1->first](1);
+                edge_vertex_j.x = vertices[it1->first](0);
+                edge_vertex_j.y = vertices[it1->first](1);
                 edge_vertex_j.z = 0.0;
                 edges_marker_.points.push_back(edge_vertex_j);
 
@@ -410,8 +371,11 @@ void PUDQGraphManager::update_odom_viz() {
 }
 
 void PUDQGraphManager::update_truth_viz() {
+
+    std::vector<Eigen::Vector3d> vertices_true = G.get_vertices_true_eucl();
+
     //Draw true trajectory minus loop closures
-    if (G.vertices_true_.size() > 1) {
+    if (vertices_true.size() > 1) {
         edges_true_marker_.header.stamp = this->get_clock()->now();
 
         if (true_marker_init_) {
@@ -423,17 +387,17 @@ void PUDQGraphManager::update_truth_viz() {
             true_marker_init_ = true;
         }
 
-        for (unsigned int i = 1; i < G.vertices_true_.size(); i++) {
+        for (unsigned int i = 1; i < vertices_true.size(); i++) {
             geometry_msgs::msg::Point edge_vertex_true_i;
-            edge_vertex_true_i.x = G.vertices_true_[i-1](0);
-            edge_vertex_true_i.y = G.vertices_true_[i-1](1);
+            edge_vertex_true_i.x = vertices_true[i-1](0);
+            edge_vertex_true_i.y = vertices_true[i-1](1);
             edge_vertex_true_i.z = 0.0;
             edges_true_marker_.points.push_back(edge_vertex_true_i);
             edges_true_marker_.colors.push_back(true_color_);
 
             geometry_msgs::msg::Point edge_vertex_true_j;
-            edge_vertex_true_j.x = G.vertices_true_[i](0);
-            edge_vertex_true_j.y = G.vertices_true_[i](1);
+            edge_vertex_true_j.x = vertices_true[i](0);
+            edge_vertex_true_j.y = vertices_true[i](1);
             edge_vertex_true_j.z = 0.0;
             edges_true_marker_.points.push_back(edge_vertex_true_j);
             edges_true_marker_.colors.push_back(true_color_);
@@ -444,15 +408,13 @@ void PUDQGraphManager::update_truth_viz() {
 }
 
 void PUDQGraphManager::viz_timer_callback() {
-    
-
     update_odom_viz();
     update_estimate_viz();
 }
 
 void PUDQGraphManager::vertex_callback(const pudq_msgs::msg::PUDQVertex::SharedPtr vertex_msg) {
     //First, make sure vertex is valid
-    if (vertex_msg->id != G.vertices_true_.size()) {
+    if (vertex_msg->id != G.get_vertices_true_eucl().size()) {
         RCLCPP_ERROR(this->get_logger(), "Invalid vertex %lu", vertex_msg->id);
         return;
     }
@@ -485,16 +447,16 @@ void PUDQGraphManager::edge_callback(const pudq_msgs::msg::PUDQEdge::SharedPtr e
     }
     Eigen::Matrix3d info_pudq = cov_pudq.inverse();
 
-    //Compute the associated odometry vertex and add it to the graph
-    Eigen::Vector4d x_j = pudq_compose(G.vertices_pudq_[edge_msg->edge_i], z_ij);
+    // Compute the associated odometry vertex and add it to the graph
+    Eigen::Vector4d x_j = pudq_compose(G.get_vertex(edge_msg->edge_i), z_ij);
     G.add_vertex(x_j);
 
-    //Save odom vertex permanently
+    // Save odom vertex permanently
     Eigen::Vector4d x_j_odom = pudq_compose(pose_to_pudq(odom_vertices_[edge_msg->edge_i]), z_ij);
     odom_vertices_.push_back(pudq_to_pose(x_j_odom));
     update_odom_viz();
 
-    //Add odom edge to the graph
+    // Add odom edge to the graph
     G.add_edge(edge_msg->edge_i, edge_msg->edge_j, z_ij, info_pudq);
     update_estimate_viz();
 }
@@ -524,7 +486,7 @@ void PUDQGraphManager::lc_edge_callback(const pudq_msgs::msg::PUDQEdge::SharedPt
     update_estimate_viz();
 
     // Optimize
-    pudq_pgo_lib::optimize_rgn_fast(&G, 1e-5, 10);
+    pudq_pgo_lib::optimize_rgn(G, 1e-5, 10);
 
     //Publish new vertices
     update_estimate_viz();
@@ -544,6 +506,6 @@ void PUDQGraphManager::print_cost(const std::shared_ptr<std_srvs::srv::Empty::Re
     (void)request;
     (void)response;
     
-    double F = pudq_pgo_lib::F_G_pudq(&G);
-    std::cout << "F(X) = " << F << std::endl;
+    double F = pudq_pgo_lib::F_G_pudq(G);
+    std::cout << "(print_cost service) F(X) = " << F << std::endl;
 }

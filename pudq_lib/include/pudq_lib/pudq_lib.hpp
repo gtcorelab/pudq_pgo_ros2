@@ -44,10 +44,10 @@ namespace pudq_lib {
     // int pudq_sign(Eigen::Vector4d q);
     double get_phi_atan2(double sin_phi, double cos_phi);
 
-    Eigen::Vector4d Exp_1(Eigen::Vector3d x_t);
+    Eigen::Vector4d Lie_Exp_1(Eigen::Vector3d x_t);
     Eigen::Vector4d Exp_x(Eigen::Vector4d x, Eigen::Vector4d y_t);
 
-    Eigen::Vector3d Log_1(Eigen::Vector4d q);
+    Eigen::Vector3d Lie_Log_1(Eigen::Vector4d q);
     Eigen::Vector4d Log_x(Eigen::Vector4d x, Eigen::Vector4d y_m);
 
     Eigen::Matrix3d pudq_info_to_eucl(Eigen::Matrix3d pudq_info_mat, double alpha);

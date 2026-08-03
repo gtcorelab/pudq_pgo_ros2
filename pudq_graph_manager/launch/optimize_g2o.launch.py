@@ -12,12 +12,12 @@ from launch.substitutions import LaunchConfiguration
 def generate_launch_description():
     robot_namespace = 'trajectory1'
 
-    rviz_cmd = Node(
-        package='rviz2',
-        executable='rviz2',
-        name='rviz2',
-        arguments=['-d', os.path.join(get_package_share_directory('turtlebot_odom'), 'rviz', 'pgo.rviz')]
-    )
+    # rviz_cmd = Node(
+    #     package='rviz2',
+    #     executable='rviz2',
+    #     name='rviz2',
+    #     arguments=['-d', os.path.join(get_package_share_directory('turtlebot_odom'), 'rviz', 'pgo.rviz')]
+    # )
 
     graph_cmd = Node(
         package='pudq_graph_manager',
@@ -33,7 +33,7 @@ def generate_launch_description():
     )
 
     ld = LaunchDescription()
-    ld.add_action(rviz_cmd)
+    # ld.add_action(rviz_cmd)
     ld.add_action(graph_cmd)
 
     return ld

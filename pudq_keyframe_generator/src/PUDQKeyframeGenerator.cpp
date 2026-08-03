@@ -72,7 +72,7 @@ void PUDQKeyframeGenerator::generate_keyframe(Eigen::Vector3d map_pose) {
 
     // Eigen::Vector4d z_ij_tilde = pose_to_pudq(pudq_to_pose(z_ij_true) + eta_ij);
 
-    Eigen::Vector4d z_ij_pudq = pudq_compose(z_ij_true, Exp_1(eta_ij));
+    Eigen::Vector4d z_ij_pudq = pudq_compose(z_ij_true, pudq_lib::Lie_Exp_1(eta_ij));
     Eigen::Vector3d z_ij_eucl = pudq_to_pose(z_ij_pudq);
 
     // ROS_WARN_STREAM("x_i: [" << map_pose_prev_(0) << ", "<< map_pose_prev_(1) << ", "<< map_pose_prev_(2) << "]");

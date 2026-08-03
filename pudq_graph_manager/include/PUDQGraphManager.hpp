@@ -70,14 +70,11 @@ private:
 
     //Odom graph object
     std::vector<Eigen::Vector3d> odom_vertices_;
+
     // std::map<int, std::string> neighbor_list_;
     // std::vector<unsigned int> public_vertices_;
 
     void initialize_graph();
-
-    void init_g2o_vertices(int num_vertices);
-    void odom_init();
-
     int read_g2o_file();
 
     void initialize_viz();
@@ -102,7 +99,6 @@ private:
     
 public:
     PUDQGraphManager();
-    
 };
 
 #endif
