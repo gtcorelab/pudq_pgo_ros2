@@ -250,7 +250,8 @@ namespace pudq_pgo_lib {
         // H_k = rgnhess_k.block(4, 4, 4*(N-1), 4*(N-1));
         // b_k = rgrad_k.tail(4*(N-1));
 
-        Eigen::SparseLU<SparseMatrix> solver;
+        // Eigen::SparseLU<SparseMatrix> solver;
+        Eigen::SimplicialLDLT<SparseMatrix> solver;
         
         for (int k = 0; k < max_iter; k++) {
 
@@ -266,11 +267,18 @@ namespace pudq_pgo_lib {
                 solver.analyzePattern(H_k);
             }
 
-            solver.factorize(H_k);
-            S_k_trunc = solver.solve(-b_k);
+            solver.compute(H_k);
+            
+            if (solver.info() != Eigen::Success) {
+                std::fprintf(stderr, "WARNING: RLM Sparse factorization failed!\n");
+                continue; 
+            }
 
+            S_k_trunc = solver.solve(-b_k);
             double residual = (H_k*S_k_trunc + b_k).norm();
             std::cout << "Linear Residual = " << residual << std::endl;
+
+            return;
 
             S_k.tail(4*(N-1)) = S_k_trunc;
             S_k = P_X*S_k;
