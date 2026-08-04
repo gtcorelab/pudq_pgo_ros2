@@ -1,6 +1,8 @@
 #ifndef PUDQ_GRAPH_MANAGER_HPP
 #define PUDQ_GRAPH_MANAGER_HPP
 
+#include <queue>
+
 #include <rclcpp/rclcpp.hpp>
 
 #include <geometry_msgs/msg/pose_array.hpp>
@@ -70,6 +72,7 @@ private:
 
     //Odom graph object
     std::vector<Eigen::Vector3d> odom_vertices_;
+    std::queue<pudq_msgs::msg::PUDQEdge::SharedPtr> lc_edge_msg_queue;
 
     // std::map<int, std::string> neighbor_list_;
     // std::vector<unsigned int> public_vertices_;
@@ -87,8 +90,9 @@ private:
 
     void vertex_callback(const pudq_msgs::msg::PUDQVertex::SharedPtr vertex_msg);
     void edge_callback(const pudq_msgs::msg::PUDQEdge::SharedPtr edge_msg);
-    void lc_edge_callback(const pudq_msgs::msg::PUDQEdge::SharedPtr &lc_edge_msg);
+    void lc_edge_callback(const pudq_msgs::msg::PUDQEdge::SharedPtr lc_edge_msg);
 
+    void process_lc_edge(const pudq_msgs::msg::PUDQEdge::SharedPtr lc_edge_msg);
     // void multi_lc_edge_callback(const pudq_msgs::PUDQMultiEdgeConstPtr &multi_lc_edge_msg);
     // void public_vertex_callback(const pudq_msgs::PUDQVertexArrayConstPtr &vertex_array_msg, int robot_id);
 

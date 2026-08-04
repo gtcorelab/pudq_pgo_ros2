@@ -30,10 +30,11 @@ private:
     // ros::Publisher edge_publisher_, pudq_edge_publisher_, vertex_true_publisher_;
     rclcpp::Publisher<pudq_msgs::msg::PUDQVertex>::SharedPtr vertex_true_publisher_;
     rclcpp::Publisher<pudq_msgs::msg::PUDQEdge>::SharedPtr pudq_edge_publisher_;
+    rclcpp::Publisher<pudq_msgs::msg::PUDQEdge>::SharedPtr pudq_lc_publisher_;
 
     rclcpp::TimerBase::SharedPtr timer_;
 
-    int num_edges_;
+    size_t num_odom_edges_;
     double t_threshold_, theta_threshold_;
     double sigma_t_, sigma_theta_;
 
@@ -44,8 +45,14 @@ private:
     std::normal_distribution<double> normrnd_t_, normrnd_theta_;
 
     Eigen::Vector3d map_pose_prev_;
-
     Eigen::Vector4d map_pudq_;
+
+    size_t num_vertices_;
+    std::vector<Eigen::Vector3d> vertices_true_eucl_;
+    std::vector<Eigen::Vector4d> vertices_true_pudq_;
+
+    double intra_lc_range_, intra_lc_fov_, intra_lc_prob_;
+    double intra_sigma_t_, intra_sigma_theta_;
 
     std::unique_ptr<tf2_ros::TransformBroadcaster> map_tf_broadcaster_;
     geometry_msgs::msg::TransformStamped map_tf_;
@@ -54,6 +61,7 @@ private:
 
     void pose_callback(const geometry_msgs::msg::PoseStamped::SharedPtr pose_msg);
     void generate_keyframe(Eigen::Vector3d pose);
+    void detect_loop_closure();
     void timer_callback();
 public:
 	PUDQKeyframeGenerator();

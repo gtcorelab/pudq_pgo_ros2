@@ -76,7 +76,7 @@ PUDQGraphManager::PUDQGraphManager() : Node("pudq_graph_manager_node") {
         // Subsribe to odom and loop closure edges
         // lc_subscriber_ = nh_.subscribe<pudq_msgs::PUDQEdge>("pudq_loop_closure", 10, boost::bind(&PUDQGraphManager::lc_edge_callback, this, _1));
         edge_subscriber_ = this->create_subscription<pudq_msgs::msg::PUDQEdge>("pudq_edge", 10, std::bind(&PUDQGraphManager::edge_callback, this, _1));
-        // lc_subscriber_ = this->create_subscription<pudq_msgs::msg::PUDQEdge>("pudq_loop_closure", 10, std::bind(&PUDQGraphManager::lc_edge_callback, this, _1));
+        lc_subscriber_ = this->create_subscription<pudq_msgs::msg::PUDQEdge>("pudq_loop_closure", 10, std::bind(&PUDQGraphManager::lc_edge_callback, this, _1));
 
         // Start timer for visualization
         viz_timer_ = this->create_wall_timer(500ms, std::bind(&PUDQGraphManager::viz_timer_callback, this));
@@ -376,9 +376,9 @@ void PUDQGraphManager::update_odom_viz() {
 void PUDQGraphManager::update_truth_viz() {
 
     std::vector<Eigen::Vector3d> vertices_true_eucl = G.get_vertices_true_eucl();
-    for (size_t i = 1; i < vertices_true_eucl.size(); i++) {
-        std::cout << i << ") " << vertices_true_eucl[i-1].transpose() << " -> " << vertices_true_eucl[i].transpose() << std::endl;
-    }
+    // for (size_t i = 1; i < vertices_true_eucl.size(); i++) {
+    //     std::cout << i << ") " << vertices_true_eucl[i-1].transpose() << " -> " << vertices_true_eucl[i].transpose() << std::endl;
+    // }
 
     //Draw true trajectory minus loop closures
     if (vertices_true_eucl.size() > 1) {
@@ -421,7 +421,7 @@ void PUDQGraphManager::viz_timer_callback() {
 // Vertex callback only applies to ground truth
 void PUDQGraphManager::vertex_callback(const pudq_msgs::msg::PUDQVertex::SharedPtr vertex_msg) {
 
-    RCLCPP_INFO(this->get_logger(), "vertex callback");
+    // RCLCPP_INFO(this->get_logger(), "vertex callback");
 
     //First, make sure vertex is valid
     if (vertex_msg->id != G.get_vertices_true().size()) {
@@ -438,8 +438,6 @@ void PUDQGraphManager::vertex_callback(const pudq_msgs::msg::PUDQVertex::SharedP
 
 // Add odom edge to graph
 void PUDQGraphManager::edge_callback(const pudq_msgs::msg::PUDQEdge::SharedPtr edge_msg) {
-
-    RCLCPP_INFO(this->get_logger(), "edge callback");
 
     //First, make sure both vertices are valid
     if (!(edge_msg->edge_i < G.get_num_vertices() && edge_msg->edge_j == G.get_num_vertices())) {
@@ -471,19 +469,35 @@ void PUDQGraphManager::edge_callback(const pudq_msgs::msg::PUDQEdge::SharedPtr e
     // Add odom edge to the graph
     G.add_edge(edge_msg->edge_i, edge_msg->edge_j, z_ij, info_pudq);
     update_estimate_viz();
+
+    // Check for unprocessed loop closure originating from vertex j
+    if (lc_edge_msg_queue.size() > 0) {
+        pudq_msgs::msg::PUDQEdge::SharedPtr lc_edge_msg = lc_edge_msg_queue.front();
+        if (lc_edge_msg->edge_i == edge_msg->edge_j) {
+            // It's a match! Process and pop it off the queue.
+            process_lc_edge(lc_edge_msg);
+            lc_edge_msg_queue.pop();
+        }
+    }
 }
 
 // Add loop closure edge to graph
-void PUDQGraphManager::lc_edge_callback(const pudq_msgs::msg::PUDQEdge::SharedPtr &lc_edge_msg) {
-
-    RCLCPP_INFO(this->get_logger(), "lc callback");
+void PUDQGraphManager::lc_edge_callback(const pudq_msgs::msg::PUDQEdge::SharedPtr lc_edge_msg) {
 
     // First, make sure both vertices are valid
-    if (!(lc_edge_msg->edge_i < G.get_num_vertices() && lc_edge_msg->edge_j < G.get_num_vertices())) {
+    size_t N = G.get_num_vertices();
+    if (lc_edge_msg->edge_i < N && lc_edge_msg->edge_j < N) {
+        process_lc_edge(lc_edge_msg);
+    } else if (lc_edge_msg->edge_i == N && lc_edge_msg->edge_j < N) {
+        // LC came in slightly early, so add it to the queue
+        lc_edge_msg_queue.push(lc_edge_msg);
+    } else {
+        // Invalid LC
         RCLCPP_ERROR(this->get_logger(), "PUDQGraphManager %s: Invalid loop closure edge (%lu, %lu)", robot_name_.c_str(), lc_edge_msg->edge_i, lc_edge_msg->edge_j);
-        return;
     }
+}
 
+void PUDQGraphManager::process_lc_edge(const pudq_msgs::msg::PUDQEdge::SharedPtr lc_edge_msg) {
     Eigen::Vector4d z_ij;
     z_ij << lc_edge_msg->delta_pose[0], lc_edge_msg->delta_pose[1], lc_edge_msg->delta_pose[2], lc_edge_msg->delta_pose[3];
 
@@ -501,7 +515,7 @@ void PUDQGraphManager::lc_edge_callback(const pudq_msgs::msg::PUDQEdge::SharedPt
     update_estimate_viz();
 
     // Optimize
-    pudq_pgo_lib::optimize_rgn(G, 1e-5, 10);
+    pudq_pgo_lib::optimize_rlm(G, 1e-5, 10);
 
     //Publish new vertices
     update_estimate_viz();
