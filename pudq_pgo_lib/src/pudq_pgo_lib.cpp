@@ -228,7 +228,11 @@ namespace pudq_pgo_lib {
 
     void optimize_rgn(PUDQGraph &G, double tol, int max_iter) {
 
-        std::cout << G.get_num_vertices() << " vertices, " << G.get_num_edges() << " edges" << std::endl;
+        rclcpp::Logger logger = rclcpp::get_logger("pudq_pgo_lib");
+
+        RCLCPP_INFO(logger, "RGN: Optimizing over %ld vertices, %ld edges", G.get_num_vertices(), G.get_num_edges());
+
+        // std::cout << G.get_num_vertices() << " vertices, " << G.get_num_edges() << " edges" << std::endl;
 
         size_t N = G.get_num_vertices();
 
@@ -277,35 +281,35 @@ namespace pudq_pgo_lib {
 
             if (k == 0) {
                 if (!solver.data()->setHessianMatrix(H_k)) {
-                    std::fprintf(stderr, "Error setting Hessian!\n");
+                    RCLCPP_ERROR(logger, "Error setting Hessian!\n");
                     return;
                 }
 
                 if (!solver.data()->setGradient(b_k)) {
-                    std::fprintf(stderr, "Error setting Gradient!\n");
+                    RCLCPP_ERROR(logger, "Error setting Gradient!\n");
                     return;
                 }
 
                 // instantiate the solver
                 if (!solver.initSolver()) {
-                    std::fprintf(stderr, "Error initializing solver!\n");
+                    RCLCPP_ERROR(logger, "Error initializing solver!\n");
                     return;
                 }
             } else {
                 if (!solver.updateHessianMatrix(H_k)) {
-                    std::fprintf(stderr, "Error updating Hessian!\n");
+                    RCLCPP_ERROR(logger, "Error updating Hessian!\n");
                     return;
                 }
 
                 if (!solver.updateGradient(b_k)) {
-                    std::fprintf(stderr, "Error updating Gradient!\n");
+                    RCLCPP_ERROR(logger, "Error updating Gradient!\n");
                     return;
                 }
             }
 
             // solve the QP problem
             if (solver.solveProblem() != OsqpEigen::ErrorExitFlag::NoError) {
-                std::fprintf(stderr, "Solver failed!\n");
+                RCLCPP_ERROR(logger, "Solver failed!\n");
                 return;
             }
 
@@ -347,7 +351,11 @@ namespace pudq_pgo_lib {
 
     void optimize_rlm(PUDQGraph &G, double epsilon_g, int max_iter) {
 
-        std::cout << G.get_num_vertices() << " vertices, " << G.get_num_edges() << " edges" << std::endl;
+        rclcpp::Logger logger = rclcpp::get_logger("pudq_pgo_lib");
+
+        RCLCPP_INFO(logger, "RLM: Optimizing over %ld vertices, %ld edges", G.get_num_vertices(), G.get_num_edges());
+
+        // std::cout << G.get_num_vertices() << " vertices, " << G.get_num_edges() << " edges" << std::endl;
 
         size_t N = G.get_num_vertices();
 
@@ -371,7 +379,7 @@ namespace pudq_pgo_lib {
         std::tie(X_k, P_X, F_k, rgrad_k, rgnhess_k) = rgn_gradhess(G);
         double gradnorm_k = rgrad_k.norm();
 
-        fprintf(stdout, "RLM Initialization: F_k = %.4f, ||g_k|| = %.4f\n", F_k, gradnorm_k);
+        RCLCPP_INFO(logger, "RLM Initialization: F_k = %.4f, ||g_k|| = %.4f", F_k, gradnorm_k);
 
         // instantiate the solver
         OsqpEigen::Solver solver;
@@ -382,6 +390,9 @@ namespace pudq_pgo_lib {
         solver.settings()->setRelativeTolerance(1e-8);
         solver.settings()->setPrimalInfeasibilityTolerance(1e-8);
         solver.settings()->setDualInfeasibilityTolerance(1e-8);
+        solver.settings()->setWarmStart(true);
+        solver.settings()->setPolish(true);
+        solver.settings()->setMaxIteration(10000);
  
         // RLM parameters
         double mu_min = 1e-12;
@@ -408,7 +419,7 @@ namespace pudq_pgo_lib {
             if (k > 0) {
                 // Compute convergence properties
                 double gradnorm_k = rgrad_k.norm();
-                fprintf(stdout, "Iteration %d: F_k = %.4f, ||g_k|| = %.4f, lambda = %.4e\n", k, F_k, gradnorm_k, lambda_k);
+                RCLCPP_INFO(logger, "Iteration %d: F_k = %.4f, ||g_k|| = %.4f, lambda = %.4e", k, F_k, gradnorm_k, lambda_k);
             }
             
             if (rgrad_k.norm() < epsilon_g) {
@@ -424,35 +435,35 @@ namespace pudq_pgo_lib {
 
             if (k == 0) {
                 if (!solver.data()->setHessianMatrix(H_k)) {
-                    std::fprintf(stderr, "Error setting Hessian!\n");
+                    RCLCPP_ERROR(logger, "Error setting Hessian!\n");
                     return;
                 }
 
                 if (!solver.data()->setGradient(b_k)) {
-                    std::fprintf(stderr, "Error setting Gradient!\n");
+                    RCLCPP_ERROR(logger, "Error setting Gradient!\n");
                     return;
                 }
 
                 // instantiate the solver
                 if (!solver.initSolver()) {
-                    std::fprintf(stderr, "Error initializing solver!\n");
+                    RCLCPP_ERROR(logger, "Error initializing solver!\n");
                     return;
                 }
             } else {
                 if (!solver.updateHessianMatrix(H_k)) {
-                    std::fprintf(stderr, "Error updating Hessian!\n");
+                    RCLCPP_ERROR(logger, "Error updating Hessian!\n");
                     return;
                 }
 
                 if (!solver.updateGradient(b_k)) {
-                    std::fprintf(stderr, "Error updating Gradient!\n");
+                    RCLCPP_ERROR(logger, "Error updating Gradient!\n");
                     return;
                 }
             }
 
             // solve the QP problem
             if (solver.solveProblem() != OsqpEigen::ErrorExitFlag::NoError) {
-                std::fprintf(stderr, "Solver failed!\n");
+                RCLCPP_ERROR(logger, "Solver failed!\n");
                 return;
             }
 
@@ -460,7 +471,7 @@ namespace pudq_pgo_lib {
 
             // Check linear residual
             double linear_residual = (H_k*S_k_trunc + b_k).norm();
-            // std::cout << "Linear residual ||H*S-b|| = " << linear_residual << std::endl;
+            RCLCPP_WARN(logger, "Linear residual ||H*S-b|| = %.6f", linear_residual);
 
             S_k.tail(4*(N-1)) = S_k_trunc;
             S_k = P_X*S_k;
@@ -493,7 +504,7 @@ namespace pudq_pgo_lib {
         }
 
         if (!converged) {
-            std::cerr << "RLM DID NOT CONVERGE! I REPEAT, RLM DID NOT CONVERGE!" << std::endl;
+            RCLCPP_ERROR(logger, "RLM DID NOT CONVERGE! I REPEAT, RLM DID NOT CONVERGE!");
         }
     }
 

@@ -48,7 +48,7 @@ PUDQGraphManager::PUDQGraphManager() : Node("pudq_graph_manager_node") {
     vertices_publisher_ = this->create_publisher<geometry_msgs::msg::PoseArray>("vertices", rclcpp::ServicesQoS());
     edge_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>("edge_viz", rclcpp::ServicesQoS());
     odom_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>("odom_viz", rclcpp::ServicesQoS());
-    // edge_true_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>("true_edge_viz", 10);
+    edge_true_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>("true_edge_viz", 10);
     // legend_publisher_.publish(legend_markers_);
 
     //Initialize tf listener
@@ -64,7 +64,7 @@ PUDQGraphManager::PUDQGraphManager() : Node("pudq_graph_manager_node") {
         // Start a 1 second viz update timer
         // viz_timer_ = this->create_wall_timer(1s, std::bind(&PUDQGraphManager::viz_timer_callback, this));
 
-        pudq_pgo_lib::optimize_rlm(G, 1e-4, 100);
+        pudq_pgo_lib::optimize_rlm(G, 1e-4, 500);
 
     } else {
         // Initialize graph to identity vertex
@@ -77,6 +77,9 @@ PUDQGraphManager::PUDQGraphManager() : Node("pudq_graph_manager_node") {
         // lc_subscriber_ = nh_.subscribe<pudq_msgs::PUDQEdge>("pudq_loop_closure", 10, boost::bind(&PUDQGraphManager::lc_edge_callback, this, _1));
         edge_subscriber_ = this->create_subscription<pudq_msgs::msg::PUDQEdge>("pudq_edge", 10, std::bind(&PUDQGraphManager::edge_callback, this, _1));
         // lc_subscriber_ = this->create_subscription<pudq_msgs::msg::PUDQEdge>("pudq_loop_closure", 10, std::bind(&PUDQGraphManager::lc_edge_callback, this, _1));
+
+        // Start timer for visualization
+        viz_timer_ = this->create_wall_timer(500ms, std::bind(&PUDQGraphManager::viz_timer_callback, this));
     }
 
     // Distributed stuff
@@ -356,14 +359,13 @@ void PUDQGraphManager::update_odom_viz() {
             odom_vertex_i.y = odom_vertices_[i-1](1);
             odom_vertex_i.z = 0.0;
             odom_marker_.points.push_back(odom_vertex_i);
+            odom_marker_.colors.push_back(odom_color_);
 
             geometry_msgs::msg::Point odom_vertex_j;
             odom_vertex_j.x = odom_vertices_[i](0);
             odom_vertex_j.y = odom_vertices_[i](1);
             odom_vertex_j.z = 0.0;
             odom_marker_.points.push_back(odom_vertex_j);
-
-            odom_marker_.colors.push_back(odom_color_);
             odom_marker_.colors.push_back(odom_color_);
         }
 
@@ -373,10 +375,13 @@ void PUDQGraphManager::update_odom_viz() {
 
 void PUDQGraphManager::update_truth_viz() {
 
-    std::vector<Eigen::Vector3d> vertices_true = G.get_vertices_true_eucl();
+    std::vector<Eigen::Vector3d> vertices_true_eucl = G.get_vertices_true_eucl();
+    for (size_t i = 1; i < vertices_true_eucl.size(); i++) {
+        std::cout << i << ") " << vertices_true_eucl[i-1].transpose() << " -> " << vertices_true_eucl[i].transpose() << std::endl;
+    }
 
     //Draw true trajectory minus loop closures
-    if (vertices_true.size() > 1) {
+    if (vertices_true_eucl.size() > 1) {
         edges_true_marker_.header.stamp = this->get_clock()->now();
 
         if (true_marker_init_) {
@@ -388,17 +393,17 @@ void PUDQGraphManager::update_truth_viz() {
             true_marker_init_ = true;
         }
 
-        for (unsigned int i = 1; i < vertices_true.size(); i++) {
+        for (size_t i = 1; i < vertices_true_eucl.size(); i++) {
             geometry_msgs::msg::Point edge_vertex_true_i;
-            edge_vertex_true_i.x = vertices_true[i-1](0);
-            edge_vertex_true_i.y = vertices_true[i-1](1);
+            edge_vertex_true_i.x = vertices_true_eucl[i-1](0);
+            edge_vertex_true_i.y = vertices_true_eucl[i-1](1);
             edge_vertex_true_i.z = 0.0;
             edges_true_marker_.points.push_back(edge_vertex_true_i);
             edges_true_marker_.colors.push_back(true_color_);
 
             geometry_msgs::msg::Point edge_vertex_true_j;
-            edge_vertex_true_j.x = vertices_true[i](0);
-            edge_vertex_true_j.y = vertices_true[i](1);
+            edge_vertex_true_j.x = vertices_true_eucl[i](0);
+            edge_vertex_true_j.y = vertices_true_eucl[i](1);
             edge_vertex_true_j.z = 0.0;
             edges_true_marker_.points.push_back(edge_vertex_true_j);
             edges_true_marker_.colors.push_back(true_color_);
@@ -413,9 +418,13 @@ void PUDQGraphManager::viz_timer_callback() {
     update_estimate_viz();
 }
 
+// Vertex callback only applies to ground truth
 void PUDQGraphManager::vertex_callback(const pudq_msgs::msg::PUDQVertex::SharedPtr vertex_msg) {
+
+    RCLCPP_INFO(this->get_logger(), "vertex callback");
+
     //First, make sure vertex is valid
-    if (vertex_msg->id != G.get_vertices_true_eucl().size()) {
+    if (vertex_msg->id != G.get_vertices_true().size()) {
         RCLCPP_ERROR(this->get_logger(), "Invalid vertex %lu", vertex_msg->id);
         return;
     }
@@ -427,8 +436,10 @@ void PUDQGraphManager::vertex_callback(const pudq_msgs::msg::PUDQVertex::SharedP
     update_truth_viz();
 }
 
-//Add odom edge to graph
+// Add odom edge to graph
 void PUDQGraphManager::edge_callback(const pudq_msgs::msg::PUDQEdge::SharedPtr edge_msg) {
+
+    RCLCPP_INFO(this->get_logger(), "edge callback");
 
     //First, make sure both vertices are valid
     if (!(edge_msg->edge_i < G.get_num_vertices() && edge_msg->edge_j == G.get_num_vertices())) {
@@ -464,6 +475,9 @@ void PUDQGraphManager::edge_callback(const pudq_msgs::msg::PUDQEdge::SharedPtr e
 
 // Add loop closure edge to graph
 void PUDQGraphManager::lc_edge_callback(const pudq_msgs::msg::PUDQEdge::SharedPtr &lc_edge_msg) {
+
+    RCLCPP_INFO(this->get_logger(), "lc callback");
+
     // First, make sure both vertices are valid
     if (!(lc_edge_msg->edge_i < G.get_num_vertices() && lc_edge_msg->edge_j < G.get_num_vertices())) {
         RCLCPP_ERROR(this->get_logger(), "PUDQGraphManager %s: Invalid loop closure edge (%lu, %lu)", robot_name_.c_str(), lc_edge_msg->edge_i, lc_edge_msg->edge_j);

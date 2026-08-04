@@ -61,7 +61,7 @@ def generate_launch_description():
         package='rviz2',
         executable='rviz2',
         name='rviz2',
-        arguments=['-d', os.path.join(get_package_share_directory('turtlebot_odom'), 'rviz', 'pgo.rviz')]
+        arguments=['-d', os.path.join(get_package_share_directory('turtlebot_odom'), 'rviz', 'single_agent_pgo.rviz')]
     )
 
     odometry_cmd = Node(

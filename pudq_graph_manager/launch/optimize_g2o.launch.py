@@ -27,7 +27,7 @@ def generate_launch_description():
             'fixed_frame': 'world',
             'map_frame': 'map',
             'g2o_mode': True,
-            'g2o_file': os.path.join(get_package_share_directory('pudq_graph_manager'), 'g2o', 'Grid1000.g2o')
+            'g2o_file': os.path.join(get_package_share_directory('pudq_graph_manager'), 'g2o', 'intel.g2o')
         }],
         output='screen'
     )

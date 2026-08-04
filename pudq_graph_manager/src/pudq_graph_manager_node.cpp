@@ -9,9 +9,7 @@ int main(int argc, char ** argv) {
     omp_set_num_threads(num_cpu);
 
     rclcpp::init(argc, argv);
-    // rclcpp::spin(std::make_shared<PUDQGraphManager>());
-
-    std::make_shared<PUDQGraphManager>();
+    rclcpp::spin(std::make_shared<PUDQGraphManager>());
 
     rclcpp::shutdown();
     return 0;
