@@ -152,7 +152,7 @@ void PUDQGraph::set_vertex(size_t i, Eigen::Vector4d vertex_pudq) {
     vertices_eucl_[i] = pudq_to_pose(vertex_pudq);
 }
 
-void set_vertices(std::vector<Eigen::Vector4d> &X) {
+void PUDQGraph::set_vertices(std::vector<Eigen::Vector4d> &X) {
     vertices_pudq_ = X;
     update_eucl_vertices();
 }
