@@ -515,7 +515,7 @@ void PUDQGraphManager::process_lc_edge(const pudq_msgs::msg::PUDQEdge::SharedPtr
     update_estimate_viz();
 
     // Optimize
-    pudq_pgo_lib::optimize_rlm(G, 1e-5, 10);
+    // pudq_pgo_lib::optimize_rlm(G, 1e-5, 10);
 
     //Publish new vertices
     update_estimate_viz();
