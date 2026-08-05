@@ -129,6 +129,10 @@ namespace pudq_lib {
         return x == 0 ? 1.0 : sin(x)/x;
     }
 
+    double sinc_recip(double x) {
+        return x == 0 ? 1.0 : x/sin(x);
+    }
+
     Eigen::Matrix4d Q_L(const Eigen::Vector4d &x) {
         Eigen::Matrix4d Q;
         Q << x(0), -x(1), 0.0,   0.0,
@@ -304,8 +308,8 @@ namespace pudq_lib {
 
     Eigen::Vector3d Lie_Log_1(Eigen::Vector4d r) {
         double phi = get_phi_atan2(r(1), r(0));
-        double gamma = sinc(phi);
-        Eigen::Vector3d x_t = r.segment(1,3)/gamma;
+        double gamma_recip = sinc_recip(phi);
+        Eigen::Vector3d x_t = r.segment(1,3)*gamma_recip;
 
         return x_t;
     }

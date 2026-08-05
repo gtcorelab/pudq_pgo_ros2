@@ -68,8 +68,8 @@ PUDQKeyframeGenerator::PUDQKeyframeGenerator() : Node("pudq_keyframe_generator_n
 }
 
 void PUDQKeyframeGenerator::generate_keyframe(Eigen::Vector3d map_pose) {
-    unsigned int edge_i = num_odom_edges_;
-    unsigned int edge_j = num_odom_edges_ + 1;
+    size_t edge_i = num_odom_edges_;
+    size_t edge_j = num_odom_edges_ + 1;
 
     //Convert measurement to PUDQ
     Eigen::Vector4d x_j = pose_to_pudq(map_pose);
@@ -82,16 +82,13 @@ void PUDQKeyframeGenerator::generate_keyframe(Eigen::Vector3d map_pose) {
     // Todo: Randomize covariance matrix (currently isotropic distribution)
     Eigen::Vector3d eta_ij;
     eta_ij << normrnd_theta_(gen_), normrnd_t_(gen_), normrnd_t_(gen_);
+    Eigen::Vector4d z_ij_pudq = pudq_compose(z_ij_true, pudq_lib::Lie_Exp_1(eta_ij));
 
     //Todo: Change to correlated noise
     Eigen::Matrix3d pudq_cov = Eigen::Matrix3d::Zero();
     pudq_cov(0,0) = sigma_theta_*sigma_theta_;
     pudq_cov(1,1) = sigma_t_*sigma_t_;
     pudq_cov(2,2) = sigma_t_*sigma_t_;
-
-    // Eigen::Vector4d z_ij_tilde = pose_to_pudq(pudq_to_pose(z_ij_true) + eta_ij);
-
-    Eigen::Vector4d z_ij_pudq = pudq_compose(z_ij_true, pudq_lib::Lie_Exp_1(eta_ij));
 
     // Eigen::Vector3d z_ij_eucl = pudq_to_pose(z_ij_pudq);
     // ROS_WARN_STREAM("x_i: [" << map_pose_prev_(0) << ", "<< map_pose_prev_(1) << ", "<< map_pose_prev_(2) << "]");
@@ -101,19 +98,6 @@ void PUDQKeyframeGenerator::generate_keyframe(Eigen::Vector3d map_pose) {
 
     std::array<double, 4> z_ij_pudq_msg{z_ij_pudq(0), z_ij_pudq(1), z_ij_pudq(2), z_ij_pudq(3)};
     std::array<double, 9> cov_pudq_msg{pudq_cov(0,0), 0.0, 0.0, 0.0, pudq_cov(1,1), 0.0, 0.0, 0.0, pudq_cov(2,2)};
-
-    // Compute 3d Euclidean covariance
-    // Eigen::Matrix3d eucl_cov = pudq_cov_to_eucl(pudq_cov, eta_ij(0));
-    // Eigen::MatrixXd eucl_cov_3d = eucl_cov_2d_to_3d(eucl_cov);
-
-    // Convert 6x6 euclidean Covariance matrix to 36x1 boost array for relative_nav Edge message
-    // std::vector<double> cov_eucl_msg(36);
-    // int k=0;
-    // for (int i=0; i<6; i++) {
-    //     for (int j=0; j<6; j++) {
-    //         cov_eucl_msg[k] = eucl_cov_3d(i,j);
-    //     }
-    // }
 
     //Publish PUDQ edge message
     rclcpp::Time now = this->get_clock()->now();
@@ -152,60 +136,6 @@ void PUDQKeyframeGenerator::generate_keyframe(Eigen::Vector3d map_pose) {
     vertices_true_eucl_.push_back(pudq_to_pose(x_j));
 
     num_vertices_++;
-}
-
-void PUDQKeyframeGenerator::pose_callback(const geometry_msgs::msg::PoseStamped::SharedPtr pose_msg) {
-    double yaw = quat_to_yaw(pose_msg->pose.orientation);
-
-    //Extract 2D translation and rotation
-    Eigen::Vector3d pose;
-    pose << pose_msg->pose.position.x, pose_msg->pose.position.y, yaw;
-
-    //Initialize previous pose if not done already
-    if (!initialized_) {
-
-        // Initialize map transform PUDQ and TF
-        map_pudq_ = pose_to_pudq(pose);
-
-        // Initialize pose in map frame
-        map_pose_prev_ = pudq_to_pose(pudq_identity());
-
-        vertices_true_pudq_.push_back(pudq_identity());
-        vertices_true_pudq_.push_back(map_pudq_);
-
-        vertices_true_eucl_.push_back(map_pose_prev_);
-        vertices_true_eucl_.push_back(pose);
-        num_vertices_ = 2;
-
-        //Initialize map frame
-        map_tf_.header.frame_id = fixed_frame_id_;
-        map_tf_.child_frame_id = map_frame_id_;
-        map_tf_.transform.translation.x = pose_msg->pose.position.x;
-        map_tf_.transform.translation.y = pose_msg->pose.position.y;
-        map_tf_.transform.translation.z = 0.0;
-        map_tf_.transform.rotation = yaw_to_quat(yaw);
-
-        RCLCPP_WARN(this->get_logger(), "Map frame initialized.");
-
-        initialized_ = true;
-        return;
-    }
-
-    //Convert the global pose into the local map frame pose
-    Eigen::Vector3d map_pose = pudq_to_pose(pudq_compose(pudq_inv(map_pudq_), pose_to_pudq(pose)));
-
-    double dt = (map_pose.segment(0,2) - map_pose_prev_.segment(0,2)).norm();
-    
-    // double dtheta = dist_theta(pose(2), map_pose_prev_(2));
-
-    //If delta from previous keyframe is big enough, generate a new delta-pose "measurement"
-    if (dt >= t_threshold_) {
-        //Generate a keyframe for this pose (expressed in the local map frame)
-        generate_keyframe(map_pose);
-
-        // Check for simulated loop closure
-        detect_loop_closure();
-    }
 }
 
 void PUDQKeyframeGenerator::detect_loop_closure() {
@@ -247,9 +177,7 @@ void PUDQKeyframeGenerator::detect_loop_closure() {
                 //Compute noisy delta-pose
                 Eigen::Vector3d eta_ij;
                 eta_ij << normrnd_theta_(gen_), normrnd_t_(gen_), normrnd_t_(gen_);
-
                 Eigen::Vector4d z_ij_pudq = pudq_lib::pudq_compose(z_ij_true, Lie_Exp_1(eta_ij));
-                Eigen::Vector3d z_ij_eucl = pudq_to_pose(z_ij_pudq);
 
                 Eigen::Matrix3d pudq_cov = Eigen::Matrix3d::Zero();
                 pudq_cov(0,0) = (intra_sigma_theta_*intra_sigma_theta_);
@@ -259,42 +187,6 @@ void PUDQKeyframeGenerator::detect_loop_closure() {
                 //Convert to message format
                 std::array<double, 4> z_ij_pudq_msg{z_ij_pudq(0), z_ij_pudq(1), z_ij_pudq(2), z_ij_pudq(3)};
                 std::array<double, 9> cov_pudq_msg{pudq_cov(0,0), 0.0, 0.0, 0.0, pudq_cov(1,1), 0.0, 0.0, 0.0, pudq_cov(2,2)};
-
-                // Compute 3d Euclidean covariance
-                // Eigen::Matrix3d eucl_cov = pudq_cov_to_eucl(pudq_cov, eta_ij(0));
-                // Eigen::MatrixXd eucl_cov_3d = eucl_cov_2d_to_3d(eucl_cov);
-
-                // Convert 6x6 euclidean Covariance matrix to 36x1 boost array for relative_nav Edge message
-                // boost::array<double, 36> eucl_cov_msg;
-                // int n=0;
-                // for (int l=0; l<6; l++) {
-                //     for (int m=0; m<6; m++) {
-                //         eucl_cov_msg[n] = eucl_cov_3d(l,m);
-                //     }
-                // }
-
-                // ros::Time now = ros::Time::now();
-
-                // //Publish PUDQ lc edge
-                // pudq_msgs::PUDQEdge pudq_lc_edge_msg;
-                // pudq_lc_edge_msg.header.stamp = now;
-                // pudq_lc_edge_msg.edge_i = j;
-                // pudq_lc_edge_msg.edge_j = k;
-                // pudq_lc_edge_msg.delta_pose = z_ij_pudq_msg;
-                // pudq_lc_edge_msg.covariance = pudq_cov_msg;
-                // pudq_lc_publisher_.publish(pudq_lc_edge_msg);
-
-                // //Publish Euclidean LC edge message
-                // relative_nav::Edge eucl_lc_edge_msg;
-                // eucl_lc_edge_msg.header.stamp = now;
-                // eucl_lc_edge_msg.from_node_id = j;
-                // eucl_lc_edge_msg.to_node_id = k;
-                // eucl_lc_edge_msg.transform.translation.x = z_ij_eucl(0);
-                // eucl_lc_edge_msg.transform.translation.y = z_ij_eucl(1);
-                // eucl_lc_edge_msg.transform.translation.z = 0.0;
-                // eucl_lc_edge_msg.transform.rotation = yaw_to_quat(z_ij_eucl(2));
-                // eucl_lc_edge_msg.covariance = eucl_cov_msg;
-                // eucl_lc_publisher_.publish(eucl_lc_edge_msg);
 
                 //Publish PUDQ edge message
                 rclcpp::Time now = this->get_clock()->now();
@@ -310,6 +202,55 @@ void PUDQKeyframeGenerator::detect_loop_closure() {
                 return;
             }
         }
+    }
+}
+
+void PUDQKeyframeGenerator::pose_callback(const geometry_msgs::msg::PoseStamped::SharedPtr pose_msg) {
+    double yaw = quat_to_yaw(pose_msg->pose.orientation);
+
+    //Extract 2D translation and rotation
+    Eigen::Vector3d pose;
+    pose << pose_msg->pose.position.x, pose_msg->pose.position.y, yaw;
+
+    //Initialize previous pose if not done already
+    if (!initialized_) {
+
+        // Initialize map transform PUDQ and TF
+        map_pudq_ = pose_to_pudq(pose);
+
+        // Initialize pose in map frame
+        map_pose_prev_ = pudq_to_pose(pudq_identity());
+
+        vertices_true_pudq_.push_back(pudq_identity());
+        vertices_true_eucl_.push_back(map_pose_prev_);
+        num_vertices_ = 1;
+
+        //Initialize map frame
+        map_tf_.header.frame_id = fixed_frame_id_;
+        map_tf_.child_frame_id = map_frame_id_;
+        map_tf_.transform.translation.x = pose_msg->pose.position.x;
+        map_tf_.transform.translation.y = pose_msg->pose.position.y;
+        map_tf_.transform.translation.z = 0.0;
+        map_tf_.transform.rotation = yaw_to_quat(yaw);
+
+        RCLCPP_WARN(this->get_logger(), "Map frame initialized.");
+
+        initialized_ = true;
+        return;
+    }
+
+    //Convert the global pose into the local map frame pose
+    Eigen::Vector3d map_pose = pudq_to_pose(pudq_compose(pudq_inv(map_pudq_), pose_to_pudq(pose)));
+
+    double dt = (map_pose.segment(0,2) - map_pose_prev_.segment(0,2)).norm();
+
+    //If delta from previous keyframe is big enough, generate a new delta-pose "measurement"
+    if (dt >= t_threshold_) {
+        //Generate a keyframe for this pose (expressed in the local map frame)
+        generate_keyframe(map_pose);
+
+        // Check for simulated loop closure
+        detect_loop_closure();
     }
 }
 

@@ -74,11 +74,15 @@ private:
     std::vector<Eigen::Vector3d> odom_vertices_;
     std::queue<pudq_msgs::msg::PUDQEdge::SharedPtr> lc_edge_msg_queue;
 
+    bool saved_g2o_;
+
     // std::map<int, std::string> neighbor_list_;
     // std::vector<unsigned int> public_vertices_;
 
     void initialize_graph();
+
     int read_g2o_file();
+    int write_g2o_file(std::string filename);
 
     void initialize_viz();
     void update_estimate_viz();

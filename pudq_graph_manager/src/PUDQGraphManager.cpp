@@ -24,8 +24,9 @@ PUDQGraphManager::PUDQGraphManager() : Node("pudq_graph_manager_node") {
 
     g2o_mode_ = this->declare_parameter<bool>("g2o_mode", false);
     if (g2o_mode_) {
-        g2o_file_ = this->declare_parameter<std::string>("g2o_file", "");
 
+        // Read g2o filename parameter
+        g2o_file_ = this->declare_parameter<std::string>("g2o_file", "");
         if (g2o_file_.length() > 0) {
             RCLCPP_INFO(this->get_logger(), "Optimizing g2o file: %s", g2o_file_.c_str());
         } else {
@@ -64,7 +65,7 @@ PUDQGraphManager::PUDQGraphManager() : Node("pudq_graph_manager_node") {
         // Start a 1 second viz update timer
         // viz_timer_ = this->create_wall_timer(1s, std::bind(&PUDQGraphManager::viz_timer_callback, this));
 
-        pudq_pgo_lib::optimize_rlm(G, 1e-4, 500);
+        pudq_pgo_lib::optimize_rlm(G, 1e-4, 100);
 
     } else {
         // Initialize graph to identity vertex
@@ -81,6 +82,8 @@ PUDQGraphManager::PUDQGraphManager() : Node("pudq_graph_manager_node") {
         // Start timer for visualization
         viz_timer_ = this->create_wall_timer(500ms, std::bind(&PUDQGraphManager::viz_timer_callback, this));
     }
+
+    saved_g2o_ = false;
 
     // Distributed stuff
     // map_pudq_ = pudq_identity();
@@ -222,6 +225,69 @@ int PUDQGraphManager::read_g2o_file() {
     // std::cout << "F(X) = " << F << std::endl;
     // G.print_graph();
 
+    return 0;
+}
+
+// Export G2O file format (NOTE: uses PUDQ information matrix format)
+int PUDQGraphManager::write_g2o_file(std::string filename) {
+
+    // If we have ground truth, make sure the Euclidean information matrices are correct
+    // if (pg.get_num_true_vertices() == pg.get_num_vertices()) {
+    //     pg.update_eucl_info();
+    // } else {
+    //     std::cout << "Warning: Exporting .g2o file without updating Euclidean information matrices!" << std::endl;
+    // }
+    
+    // Open g2o file for writing
+    std::ofstream g2ofile(filename);
+
+    //Set desired precision to 16 decimal places to preserve covariances
+    g2ofile << std::fixed << std::setprecision(16);
+
+    // Check if the file opened successfully
+    if (!g2ofile.is_open()) {
+        fprintf(stderr, "Error opening file!\n");
+        return -1;
+    }
+
+    std::vector<PUDQGraph::Edge> edge_vec = G.get_edges();
+    for (size_t ij = 0; ij < edge_vec.size(); ij++) {
+
+        size_t edge_i = edge_vec[ij].i;
+        size_t edge_j = edge_vec[ij].j;
+
+        Eigen::Matrix3d Omega_ij = edge_vec[ij].Omega_ij_pudq;
+        Eigen::Vector3d p_ij = edge_vec[ij].z_ij_eucl;
+
+        // g2o edge format: i j dtx dty dtheta I11..I33
+        g2ofile << "EDGE_SE2 " << edge_i << " " << edge_j << " " << p_ij(0) << " " << p_ij(1) << " " << p_ij(2) << " ";
+
+        // Loop through upper triangle of Omega_ij
+        for (size_t i = 0; i < 3; i++) {
+            for (size_t j = i; j < 3; j++) {
+                g2ofile << Omega_ij(i,j);
+
+                if (i < 2 || i < 2) {
+                    g2ofile << " ";
+                }
+            }
+        }
+        g2ofile << std::endl;
+    }
+
+    // Write current vertices to g2o file
+    std::vector<Eigen::Vector3d> vertices_eucl = G.get_vertices_eucl();
+    for (size_t i = 0; i < vertices_eucl.size(); i++) {
+        Eigen::Vector3d p_i = vertices_eucl[i];
+
+        // g2o vertex format: id tx ty theta
+        g2ofile << "VERTEX_SE2 " << i << " " << p_i(0) << " " << p_i(1) << " " << p_i(2) << std::endl;
+    }
+
+    // Close the file
+    g2ofile.close();
+
+    std::cout << "Saved " << filename << std::endl;
     return 0;
 }
 
@@ -510,12 +576,21 @@ void PUDQGraphManager::process_lc_edge(const pudq_msgs::msg::PUDQEdge::SharedPtr
     }
     Eigen::Matrix3d info_pudq = cov_pudq.inverse();
 
+    size_t edge_i = lc_edge_msg->edge_i;
+    size_t edge_j = lc_edge_msg->edge_j;
+    RCLCPP_WARN(this->get_logger(), "Adding loop closure (%ld->%ld)", lc_edge_msg->edge_i, lc_edge_msg->edge_j);
+
     //Add loop closure edge to the graph
     G.add_edge(lc_edge_msg->edge_i, lc_edge_msg->edge_j, z_ij, info_pudq);
     update_estimate_viz();
 
     // Optimize
-    // pudq_pgo_lib::optimize_rlm(G, 1e-5, 10);
+    pudq_pgo_lib::optimize_rlm(G, 1e-5, 100);
+
+    // if (!saved_g2o_) {
+    //     saved_g2o_ = true;
+    //     write_g2o_file(std::string("/home/corelab/pudq_pgo_ros2_ws/src/pudq_pgo_ros2/pudq_graph_manager/g2o/online_test.g2o"));
+    // }
 
     //Publish new vertices
     update_estimate_viz();

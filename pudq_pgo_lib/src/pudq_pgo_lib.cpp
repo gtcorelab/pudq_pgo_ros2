@@ -351,6 +351,8 @@ namespace pudq_pgo_lib {
 
     void optimize_rlm(PUDQGraph &G, double epsilon_g, int max_iter) {
 
+        bool verbose = false;
+
         rclcpp::Logger logger = rclcpp::get_logger("pudq_pgo_lib");
 
         RCLCPP_INFO(logger, "RLM: Optimizing over %ld vertices, %ld edges", G.get_num_vertices(), G.get_num_edges());
@@ -372,27 +374,30 @@ namespace pudq_pgo_lib {
         Eigen::VectorXd S_k = Eigen::VectorXd::Zero(4*N);
         Eigen::VectorXd S_k_trunc(4*(N-1));
 
-        SparseMatrix eye(4*(N-1), 4*(N-1));
-        eye.setIdentity();
+        SparseMatrix speye(4*(N-1), 4*(N-1));
+        speye.setIdentity();
 
         // Compute initial performance metrics
         std::tie(X_k, P_X, F_k, rgrad_k, rgnhess_k) = rgn_gradhess(G);
         double gradnorm_k = rgrad_k.norm();
 
-        RCLCPP_INFO(logger, "RLM Initialization: F_k = %.4f, ||g_k|| = %.4f", F_k, gradnorm_k);
+        if (verbose) {
+            RCLCPP_INFO(logger, "RLM Initialization: F_k = %.4f, ||g_k|| = %.4f", F_k, gradnorm_k);
+        }
 
-        // instantiate the solver
-        OsqpEigen::Solver solver;
-        solver.data()->setNumberOfVariables(4*(N-1));
-        solver.data()->setNumberOfConstraints(0);
-        solver.settings()->setVerbosity(false);
-        solver.settings()->setAbsoluteTolerance(1e-8);
-        solver.settings()->setRelativeTolerance(1e-8);
-        solver.settings()->setPrimalInfeasibilityTolerance(1e-8);
-        solver.settings()->setDualInfeasibilityTolerance(1e-8);
-        solver.settings()->setWarmStart(true);
-        solver.settings()->setPolish(true);
-        solver.settings()->setMaxIteration(10000);
+        // Instantiate the solver
+        // OsqpEigen::Solver solver;
+        // solver.data()->setNumberOfVariables(4*(N-1));
+        // solver.data()->setNumberOfConstraints(0);
+        // solver.settings()->setAbsoluteTolerance(1e-8);
+        // solver.settings()->setRelativeTolerance(1e-8);
+        // solver.settings()->setPrimalInfeasibilityTolerance(1e-8);
+        // solver.settings()->setDualInfeasibilityTolerance(1e-8);
+        // solver.settings()->setWarmStart(true);
+        // solver.settings()->setMaxIteration(10000);
+        // solver.settings()->setVerbosity(true);
+
+        Eigen::SimplicialLDLT<SparseMatrix> solver;
  
         // RLM parameters
         double mu_min = 1e-12;
@@ -419,7 +424,10 @@ namespace pudq_pgo_lib {
             if (k > 0) {
                 // Compute convergence properties
                 double gradnorm_k = rgrad_k.norm();
-                RCLCPP_INFO(logger, "Iteration %d: F_k = %.4f, ||g_k|| = %.4f, lambda = %.4e", k, F_k, gradnorm_k, lambda_k);
+
+                if (verbose) {
+                    RCLCPP_INFO(logger, "Iteration %d: F_k = %.4f, ||g_k|| = %.4f, lambda = %.4e", k, F_k, gradnorm_k, lambda_k);
+                }
             }
             
             if (rgrad_k.norm() < epsilon_g) {
@@ -430,48 +438,71 @@ namespace pudq_pgo_lib {
 
             lambda_k = 2*mu_k*F_k;
 
-            H_k = rgnhess_k.block(4, 4, 4*(N-1), 4*(N-1)) + lambda_k*eye;
+            H_k = rgnhess_k.block(4, 4, 4*(N-1), 4*(N-1)) + lambda_k*speye;
             b_k = rgrad_k.tail(4*(N-1));
 
-            if (k == 0) {
-                if (!solver.data()->setHessianMatrix(H_k)) {
-                    RCLCPP_ERROR(logger, "Error setting Hessian!\n");
-                    return;
-                }
+            solver.compute(H_k);
+            if (solver.info() != Eigen::Success) {
+                std::fprintf(stderr, "WARNING: RLM Sparse factorization failed!\n");
 
-                if (!solver.data()->setGradient(b_k)) {
-                    RCLCPP_ERROR(logger, "Error setting Gradient!\n");
-                    return;
-                }
-
-                // instantiate the solver
-                if (!solver.initSolver()) {
-                    RCLCPP_ERROR(logger, "Error initializing solver!\n");
-                    return;
-                }
-            } else {
-                if (!solver.updateHessianMatrix(H_k)) {
-                    RCLCPP_ERROR(logger, "Error updating Hessian!\n");
-                    return;
-                }
-
-                if (!solver.updateGradient(b_k)) {
-                    RCLCPP_ERROR(logger, "Error updating Gradient!\n");
-                    return;
-                }
+                // Increase mu, reject the step, and move on
+                mu_k = mu_k * v;
+                last_accepted = false;
+                continue; 
             }
 
-            // solve the QP problem
-            if (solver.solveProblem() != OsqpEigen::ErrorExitFlag::NoError) {
-                RCLCPP_ERROR(logger, "Solver failed!\n");
-                return;
+            S_k_trunc = solver.solve(-b_k);
+            if (solver.info() != Eigen::Success) {
+                // Solving failed
+                std::fprintf(stderr, "WARNING: RLM solver failed to converge!\n");
+                
+                // Increase mu, reject the step, and move on
+                mu_k = mu_k * v;
+                last_accepted = false;
+                continue;
             }
 
-            S_k_trunc = solver.getSolution();
+            // if (k == 0) {
+            //     if (!solver.data()->setHessianMatrix(H_k)) {
+            //         RCLCPP_ERROR(logger, "Error setting Hessian!\n");
+            //         return;
+            //     }
+
+            //     if (!solver.data()->setGradient(b_k)) {
+            //         RCLCPP_ERROR(logger, "Error setting Gradient!\n");
+            //         return;
+            //     }
+
+            //     // instantiate the solver
+            //     if (!solver.initSolver()) {
+            //         RCLCPP_ERROR(logger, "Error initializing solver!\n");
+            //         return;
+            //     }
+            // } else {
+            //     if (!solver.updateHessianMatrix(H_k)) {
+            //         RCLCPP_ERROR(logger, "Error updating Hessian!\n");
+            //         return;
+            //     }
+
+            //     if (!solver.updateGradient(b_k)) {
+            //         RCLCPP_ERROR(logger, "Error updating Gradient!\n");
+            //         return;
+            //     }
+            // }
+
+            // // solve the QP problem
+            // if (solver.solveProblem() != OsqpEigen::ErrorExitFlag::NoError) {
+            //     RCLCPP_ERROR(logger, "Solver failed!\n");
+            //     return;
+            // }
+            // S_k_trunc = solver.getSolution();
 
             // Check linear residual
             double linear_residual = (H_k*S_k_trunc + b_k).norm();
-            RCLCPP_WARN(logger, "Linear residual ||H*S-b|| = %.6f", linear_residual);
+
+            if (verbose) {
+                RCLCPP_WARN(logger, "Linear residual ||H*S-b|| = %.6f", linear_residual);
+            }
 
             S_k.tail(4*(N-1)) = S_k_trunc;
             S_k = P_X*S_k;

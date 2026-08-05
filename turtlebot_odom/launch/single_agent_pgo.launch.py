@@ -86,6 +86,13 @@ def generate_launch_description():
         package='pudq_keyframe_generator',
         executable='pudq_keyframe_generator_node',
         namespace=robot_namespace,
+        parameters=[{
+            'fixed_frame': 'world',
+            'map_frame': 'map',
+            'intra_lc_range' : 2.0,
+            'intra_lc_fov' : 6.28,
+            'intra_lc_prob' : 0.1,
+        }],
         output='screen'
     )
 

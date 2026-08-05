@@ -26,6 +26,7 @@ namespace pudq_lib {
     std::string pudq_to_string(Eigen::Vector4d x);
 
     double sinc(double x);
+    double sinc_recip(double x);
 
     Eigen::Matrix4d Q_L(const Eigen::Vector4d &x);
     Eigen::Matrix4d Q_LLM(const Eigen::Vector4d &x);
