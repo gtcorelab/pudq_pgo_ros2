@@ -53,8 +53,8 @@ PUDQGraphManager::PUDQGraphManager() : Node("pudq_graph_manager_node") {
     // legend_publisher_.publish(legend_markers_);
 
     //Initialize tf listener
-    tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
-    tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+    // tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
+    // tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
     print_graph_service_ = this->create_service<std_srvs::srv::Empty>("print_graph", std::bind(&PUDQGraphManager::print_graph, this, _1, _2));
     print_cost_service_ = this->create_service<std_srvs::srv::Empty>("print_cost", std::bind(&PUDQGraphManager::print_cost, this, _1, _2));
